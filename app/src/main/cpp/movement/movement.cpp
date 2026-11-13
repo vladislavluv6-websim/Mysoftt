@@ -65,7 +65,6 @@ constexpr uintptr_t kClientInstanceGameMode = 0xA08;
 // 5=EAST). Сборка ItemUseInventoryTransaction уходит в тот же сетевой стек,
 // что и обычная установка, поэтому сервер принимает блок.
 constexpr uintptr_t kUseItemOnFileOffset = 0x100a059c;
-constexpr uint8_t kFaceUp = 1;
 
 // PlayerAuthInputPacket::write (0x90) — нужен только для бита START_JUMPING,
 // чтобы AutoJump выглядел как настоящий ввод прыжка.
@@ -73,7 +72,6 @@ constexpr uintptr_t kPlayerAuthInputWriteOffset = 0xdaa4864;
 constexpr uintptr_t kPacketInputData = 0x88;
 constexpr int kInputStartJumping = 31;
 
-constexpr float kGravity = 0.08f;
 constexpr float kWorldLimit = 3.0e7f;
 
 using NormalTickFn = void (*)(void *);
@@ -452,24 +450,11 @@ bool readState(void *actor, ActorState &out) {
   return true;
 }
 
-float jumpVelocityFor(float height) {
-  // v = sqrt(2 * g * h): высота апекса в блоках.
-  return std::sqrt(2.0f * kGravity * std::max(0.05f, height));
-}
-
-float randUnit() {
-  static thread_local uint64_t state = 0x2545F4914F6CDD1DULL;
-  state ^= state << 13;
-  state ^= state >> 7;
-  state ^= state << 17;
-  return static_cast<float>((state >> 40) & 0xFFFFFFu) /
-         static_cast<float>(0x1000000u);
-}
-
-// Регулировка высоты прыжка. Байпас: высота ограничена правдоподобным
-// диапазоном, добавляется лёгкий разброс, и в исходящий PlayerAuthInput
-// выставляется бит START_JUMPING — сервер видит настоящий ввод прыжка, а не
-// «телепорт вверх». Авто-режим прыгает только на ходу, как ванильный AutoJump.
+// Регулировка высоты прыжка. Байпас: скорость прыжка пересчитывается от
+// ВАНИЛЬНОГО импульса 0.42 так, что при высоте 1.25 блок вылетает РОВНО
+// ванильный прыжок (сервер предсказывает то же самое -> не детектит). Никакого
+// джиттера, только плавная шкала высоты. START_JUMPING в пакет добавляем лишь
+// в авто-режиме (в ручном его и так отправляет игра).
 void applyAutoJump(ActorState &s, int tick, bool onGround) {
   static thread_local bool prevJump = false;
 
@@ -490,12 +475,15 @@ void applyAutoJump(ActorState &s, int tick, bool onGround) {
   if (tick - g_lastAutoJumpTick < 3) return;
 
   float h = g_autoJumpHeight.load(std::memory_order_relaxed);
-  h *= 0.97f + 0.06f * randUnit();
   if (h < 0.2f) h = 0.2f;
-  if (h > 2.2f) h = 2.2f;
+  if (h > 2.0f) h = 2.0f;
 
-  s.velocity[1] = jumpVelocityFor(h);
-  g_jumpBitTicks.store(2, std::memory_order_relaxed);
+  // v = 0.42 * sqrt(h / 1.25): при h=1.25 скорость ровно ванильная.
+  const float v = 0.42f * std::sqrt(h / 1.25f);
+  s.velocity[1] = v;
+  if (autoJumpMode && !manualEdge) {
+    g_jumpBitTicks.store(1, std::memory_order_relaxed);
+  }
   g_lastAutoJumpTick = tick;
 }
 
@@ -542,26 +530,23 @@ void applyFly(ActorState &s, bool onGround) {
   }
 }
 
-// Jesus: ходьба по воде. Держим вертикальную скорость на нуле, пока игрок
-// медленно «проседает» (сигнатура воды: vy около нуля много тиков подряд).
-// ВАЖНО: никогда не толкаем вверх — иначе персонаж улетает (баг прошлой
-// версии, где добавлялась гравитационная «компенсация» +0.08).
+// Jesus: ходьба по воде «как по суше». Воду определяем по ECS-флагу
+// WasInWater/WaterTravelFlagComponent (хеши entt выведены из имён классов),
+// а не по эвристике скорости. В воде гасим погружение (vy<=0 -> 0), но не
+// тянем вверх; прыжок из воды оставляем рабочим.
 void applyJesus(ActorState &s, bool onGround) {
-  static thread_local int waterStreak = 0;
-  if (onGround) {
-    waterStreak = 0;
-    return;
+  if (onGround) return;
+  if (!gameecs::inWater(s.actor)) return;
+
+  gameecs::MoveInputState moveInput;
+  const bool haveInput = gameecs::readMoveInput(s.actor, moveInput);
+  if (haveInput && moveInput.jumping) {
+    return;  // можно выпрыгнуть
   }
 
   const float vy = s.velocity[1];
-  if (vy < 0.0f && vy > -0.12f) {
-    ++waterStreak;
-  } else {
-    waterStreak = 0;
-  }
-
-  if (waterStreak >= 2) {
-    s.velocity[1] = 0.0f;
+  if (vy < 0.0f) {
+    s.velocity[1] = 0.0f;  // стоим на поверхности, не тонем
     g_cheatingPublished.store(true, std::memory_order_relaxed);
   }
 }
@@ -600,55 +585,69 @@ void applyScaffold(ActorState &s, int tick) {
   const int baseZ = static_cast<int>(std::floor(s.position[2]));
   const int baseY = static_cast<int>(std::floor(s.position[1])) - 1;
 
-  int face = kFaceUp;
-  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
-  if (mode == 1) {
-    // Направление: по фактическому движению, иначе по yaw.
-    float dx = s.velocity[0];
-    float dz = s.velocity[2];
-    if (horizontalLength(dx, dz) < 0.02f && s.rotation) {
-      const float yawRad = s.rotation[1] * 3.14159265f / 180.0f;
-      dx = -std::sin(yawRad);
-      dz = std::cos(yawRad);
-    }
-    if (std::fabs(dx) >= std::fabs(dz)) {
-      face = (dx >= 0.0f) ? 5 : 4;  // EAST / WEST
-    } else {
-      face = (dz >= 0.0f) ? 3 : 2;  // SOUTH / NORTH
-    }
+  // Направление движения для «моста».
+  float dx = s.velocity[0];
+  float dz = s.velocity[2];
+  if (horizontalLength(dx, dz) < 0.02f && s.rotation) {
+    const float yawRad = s.rotation[1] * 3.14159265f / 180.0f;
+    dx = -std::sin(yawRad);
+    dz = std::cos(yawRad);
   }
-
-  struct BlockPos {
-    int32_t x;
-    int32_t y;
-    int32_t z;
-  } targetBlock{baseX, baseY, baseZ};
+  int moveFace;
+  if (std::fabs(dx) >= std::fabs(dz)) {
+    moveFace = (dx >= 0.0f) ? 5 : 4;  // EAST / WEST
+  } else {
+    moveFace = (dz >= 0.0f) ? 3 : 2;  // SOUTH / NORTH
+  }
 
   if (g_scaffoldRotate.load(std::memory_order_relaxed) && s.rotation) {
     const float pitch = g_scaffoldPitch.load(std::memory_order_relaxed);
     s.rotation[0] = std::max(-90.0f, std::min(-pitch, 0.0f));
   }
 
-  // Предпочитаем предмет из руки (актуальный), затем последний реально
-  // использованный. Любой невалидный/пустой — пропускаем без вызова useItemOn
-  // (никаких крашей на мусорных указателях).
-  // Основной источник — предмет, которым игрок реально ставил блок (это именно
-  // выбранный слот хотбара). Затем пробуем контейнеры экипировки. Всё строго
-  // валидируется, поэтому мусорный указатель никогда не уходит в useItemOn.
+  // Предмет из руки: сначала последний реально использованный (точный слот
+  // хотбара), затем контейнеры экипировки (слот 0/1, разные сборки хранят
+  // основную руку то в +0x00, то в +0x10). Всё строго валидируется.
   void *item = g_capturedItem.load(std::memory_order_relaxed);
-  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x10);
-  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x00);
+  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x00, 0);
+  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x00, 1);
+  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x10, 0);
   if (!usableHeldItem(item)) return;
 
-  useItemOn(reinterpret_cast<void *>(gmPtr), item, &targetBlock,
-            static_cast<uint8_t>(face));
+  struct BlockPos {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+  } below{baseX, baseY, baseZ};
+
+  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
+  bool placed = false;
+  int usedFace = moveFace;
+  if (mode == 0) {
+    // «Под собой»: ставим на верхнюю грань блока под ногами (работает в
+    // прыжке/падении — блок появляется под игроком).
+    usedFace = 1;
+    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below, 1);
+  } else {
+    // «Мост»: кликаем боковую грань блока под ногами в сторону движения.
+    usedFace = moveFace;
+    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below,
+                       static_cast<uint8_t>(moveFace));
+  }
+  if (!placed) {
+    // Резерв: другой вариант (мост <-> башня).
+    usedFace = (mode == 0) ? moveFace : 1;
+    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below,
+                       static_cast<uint8_t>(usedFace));
+  }
 
   if (g_debug.load(std::memory_order_relaxed)) {
     static uint32_t s_log = 0;
-    if ((s_log++ % 20) == 0) {
+    if ((s_log++ % 10) == 0) {
       __android_log_print(ANDROID_LOG_INFO, kTag,
-                          "scaffold click (%d,%d,%d) face=%d gm=%p item=%p",
-                          baseX, baseY, baseZ, face,
+                          "scaffold click (%d,%d,%d) face=%d placed=%d "
+                          "gm=%p item=%p",
+                          baseX, baseY, baseZ, usedFace, placed ? 1 : 0,
                           reinterpret_cast<void *>(gmPtr), item);
     }
   }

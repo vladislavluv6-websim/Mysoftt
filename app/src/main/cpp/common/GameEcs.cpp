@@ -37,6 +37,9 @@ using SparseSet = Registry::common_type;
 // entt component type hashes in the running Bedrock build.
 constexpr entt::id_type kHashMoveInput = 0x018B1887;
 constexpr entt::id_type kHashOnGround = 0xC29078A0;
+// fnv1a32("WasInWaterFlagComponent") / fnv1a32("WaterTravelFlagComponent")
+constexpr entt::id_type kHashWasInWater = 0x78E89F39;
+constexpr entt::id_type kHashWaterTravel = 0x2802839D;
 constexpr entt::id_type kHashEquipment = 0xB06141A9;
 constexpr entt::id_type kHashActorData = 0xC67426F3;
 constexpr entt::id_type kHashAttributes = 0xB6B29444;
@@ -166,6 +169,15 @@ bool registryForActor(void *actor, void **registry, uint32_t *entity) {
 bool hasOnGround(void *actor) {
   // OnGround is an empty tag component: presence is the value.
   return componentPresent(actor, kHashOnGround);
+}
+
+bool hasComponent(void *actor, unsigned int hash) {
+  return componentPresent(actor, static_cast<entt::id_type>(hash));
+}
+
+bool inWater(void *actor) {
+  return componentPresent(actor, kHashWasInWater) ||
+         componentPresent(actor, kHashWaterTravel);
 }
 
 bool readMoveInput(void *actor, MoveInputState &out) {
@@ -415,7 +427,9 @@ float readHealth(void *actor) {
   return health < 0.0f ? 0.0f : health;
 }
 
-void *equipmentItemStack(void *actor, unsigned long containerOffset) {
+void *equipmentItemStack(void *actor, unsigned long containerOffset,
+                         int slot) {
+  if (slot < 0) return nullptr;
   void *equipment = componentFor(actor, kHashEquipment);
   if (!equipment) return nullptr;
   const auto base = reinterpret_cast<uintptr_t>(equipment);
@@ -429,11 +443,11 @@ void *equipmentItemStack(void *actor, unsigned long containerOffset) {
       !readValue(container + kContainerItems + sizeof(void *), end)) {
     return nullptr;
   }
-  if (begin < 0x1000 || end <= begin ||
-      (end - begin) < static_cast<uintptr_t>(kStackSize)) {
-    return nullptr;
-  }
-  return reinterpret_cast<void *>(begin);
+  if (begin < 0x1000 || end <= begin) return nullptr;
+  const size_t slots = (end - begin) / kStackSize;
+  if (static_cast<size_t>(slot) >= slots) return nullptr;
+  return reinterpret_cast<void *>(begin +
+                                  static_cast<uintptr_t>(slot) * kStackSize);
 }
 
 std::string offhandItemName(void *actor) {

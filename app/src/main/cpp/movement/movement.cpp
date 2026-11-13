@@ -270,13 +270,9 @@ bool useItemOnDetour(void *gameMode, void *item, void *blockPos, uint8_t face) {
 bool installUseItemOnHook(uintptr_t address) {
   if (g_useItemOnOriginal) return true;
   if (address == 0) return false;
-  static const unsigned char kPrologue[4] = {0xff, 0xc3, 0x03, 0xd1};
-  if (!readableMemory(address, sizeof(kPrologue)) ||
-      std::memcmp(reinterpret_cast<const void *>(address), kPrologue,
-                  sizeof(kPrologue)) != 0) {
-    logWarning("GameMode::useItemOn signature resolved but bytes mismatch");
-    return false;
-  }
+  // Не проверяем байты через process_vm_readv: на этом устройстве страницы
+  // кода execute-only и чтение падает, хотя resolveSignature уже сверил
+  // точные байты. Доверяем резолверу.
   if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(address),
                        reinterpret_cast<pl::memory::FuncPtr>(useItemOnDetour),
                        reinterpret_cast<pl::memory::FuncPtr *>(
@@ -304,13 +300,6 @@ void *packetWriteDetour(void *packet, void *a1, void *a2, void *a3) {
 bool installPacketHook(uintptr_t address) {
   if (g_packetHookInstalled) return true;
   if (address == 0) return false;
-  static const unsigned char kPrologue[4] = {0xfd, 0x7b, 0xbc, 0xa9};
-  if (!readableMemory(address, sizeof(kPrologue)) ||
-      std::memcmp(reinterpret_cast<const void *>(address), kPrologue,
-                  sizeof(kPrologue)) != 0) {
-    logWarning("PlayerAuthInput::write signature resolved but bytes mismatch");
-    return false;
-  }
   if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(address),
                        reinterpret_cast<pl::memory::FuncPtr>(packetWriteDetour),
                        reinterpret_cast<pl::memory::FuncPtr *>(
@@ -613,10 +602,10 @@ void applyJesus(ActorState &s, bool onGround) {
     return;  // можно выпрыгнуть
   }
 
-  if (vy < 0.0f) {
-    s.velocity[1] = 0.0f;  // стоим на поверхности, не тонем
-    g_cheatingPublished.store(true, std::memory_order_relaxed);
-  }
+  // Полностью гасим вертикальную скорость (и вниз, и вверх от буяния воды) —
+  // стоим/идём по поверхности как по суше. Прыжок обрабатывается выше.
+  s.velocity[1] = 0.0f;
+  g_cheatingPublished.store(true, std::memory_order_relaxed);
   g_jesusActive.store(true, std::memory_order_relaxed);
 }
 
@@ -840,12 +829,12 @@ void applyMovementPost(void *actor) {
   if (state.velocity[1] < 0.0f) {
     state.velocity[1] = 0.0f;
   }
-  // Водная физика движка за тик слегка утягивает вниз — возвращаем Y на
-  // уровень входа (пока просадка небольшая). Так реально стоишь на воде, а не
-  // медленно тонешь. Большую просадку (вход в воду сверху) не трогаем.
+  // Водная физика движка за тик сдвигает Y (и вниз, и вверх от буяния).
+  // Пока сдвиг небольшой — возвращаем Y на уровень входа. Так реально стоишь
+  // на поверхности. Большой сдвиг (вход в воду сверху) не трогаем.
   if (g_jesusPreValid) {
     const float dy = g_jesusPreY - state.position[1];
-    if (dy > 0.0f && dy < 0.15f) {
+    if (std::fabs(dy) < 0.25f) {
       state.position[1] = g_jesusPreY;
     }
   }

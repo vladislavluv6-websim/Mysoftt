@@ -722,7 +722,7 @@ public class InbuiltModManager {
     }
 
     public int getAutoJumpHeightRaw() {
-        return Math.max(20, Math.min(400,
+        return Math.max(20, Math.min(2000,
                 prefs.getInt(KEY_AUTO_JUMP_HEIGHT, DEFAULT_AUTO_JUMP_HEIGHT)));
     }
 
@@ -731,7 +731,7 @@ public class InbuiltModManager {
     }
 
     public void setAutoJumpHeightRaw(int value) {
-        prefs.edit().putInt(KEY_AUTO_JUMP_HEIGHT, Math.max(20, Math.min(400, value))).apply();
+        prefs.edit().putInt(KEY_AUTO_JUMP_HEIGHT, Math.max(20, Math.min(2000, value))).apply();
     }
 
     public int getAutoJumpMode() {

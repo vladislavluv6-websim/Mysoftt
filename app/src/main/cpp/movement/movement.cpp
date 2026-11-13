@@ -81,7 +81,9 @@ using PredictionHandleFn = void *(*)(void *, void *, void *, void *);
 using UseItemOnFn = bool (*)(void *, void *, void *, uint8_t);
 using PacketWriteFn = void *(*)(void *, void *, void *, void *);
 
+using BaseTickFn = void (*)(void *);
 NormalTickFn g_normalTickOriginal = nullptr;
+BaseTickFn g_baseTickOriginal = nullptr;
 ClientInstanceUpdateFn g_clientInstanceUpdateOriginal = nullptr;
 GetLocalPlayerFn g_getLocalPlayer = nullptr;
 PredictionHandleFn g_predictionHandleOriginal = nullptr;
@@ -120,6 +122,7 @@ std::atomic<void *> g_clientInstance{nullptr};
 std::atomic<UseItemOnFn> g_useItemOn{nullptr};
 std::atomic<void *> g_capturedItem{nullptr};
 std::atomic<int> g_jumpBitTicks{0};
+std::atomic<bool> g_releaseJump{false};
 
 uintptr_t g_gameBase = 0;
 bool g_packetHookInstalled = false;
@@ -130,9 +133,12 @@ std::atomic<bool> g_cheatingPublished{false};
 std::mutex g_initMutex;
 bool g_clientHookInstalled = false;
 bool g_tickHookInstalled = false;
+bool g_baseTickHookInstalled = false;
+bool g_baseTickHookAttempted = false;
 bool g_predictionHookInstalled = false;
 bool g_installed = false;
 uintptr_t g_normalTickAddress = 0;
+uintptr_t g_baseTickAddress = 0;
 std::chrono::steady_clock::time_point g_lastInitAttempt{};
 
 int g_lastAutoJumpTick = -100;
@@ -450,11 +456,11 @@ bool readState(void *actor, ActorState &out) {
   return true;
 }
 
-// Регулировка высоты прыжка. Байпас: скорость прыжка пересчитывается от
-// ВАНИЛЬНОГО импульса 0.42 так, что при высоте 1.25 блок вылетает РОВНО
-// ванильный прыжок (сервер предсказывает то же самое -> не детектит). Никакого
-// джиттера, только плавная шкала высоты. START_JUMPING в пакет добавляем лишь
-// в авто-режиме (в ручном его и так отправляет игра).
+// Регулировка высоты прыжка. Скорость считается от ванильного импульса:
+// v = 0.42 * sqrt(h/1.25), т.е. при h=1.25 это ровно ванильный прыжок.
+// В авто-режиме выставляем РЕАЛЬНЫЙ ввод прыжка (MoveInputComponent), чтобы
+// клиент/сервер видели обычное нажатие — именно «прыжок без ввода» и палился.
+// Скорость пишем одновременно; т.к. vy>0, ванильный джамп её не перезапишет.
 void applyAutoJump(ActorState &s, int tick, bool onGround) {
   static thread_local bool prevJump = false;
 
@@ -476,12 +482,16 @@ void applyAutoJump(ActorState &s, int tick, bool onGround) {
 
   float h = g_autoJumpHeight.load(std::memory_order_relaxed);
   if (h < 0.2f) h = 0.2f;
-  if (h > 2.0f) h = 2.0f;
+  if (h > 20.0f) h = 20.0f;  // до 20 блоков
 
   // v = 0.42 * sqrt(h / 1.25): при h=1.25 скорость ровно ванильная.
   const float v = 0.42f * std::sqrt(h / 1.25f);
   s.velocity[1] = v;
+
   if (autoJumpMode && !manualEdge) {
+    // Настоящий ввод прыжка -> START_JUMPING уходит штатно, не «фантомно».
+    gameecs::setMoveJumping(s.actor, true);
+    g_releaseJump.store(true, std::memory_order_relaxed);
     g_jumpBitTicks.store(1, std::memory_order_relaxed);
   }
   g_lastAutoJumpTick = tick;
@@ -532,23 +542,46 @@ void applyFly(ActorState &s, bool onGround) {
 
 // Jesus: ходьба по воде «как по суше». Воду определяем по ECS-флагу
 // WasInWater/WaterTravelFlagComponent (хеши entt выведены из имён классов),
-// а не по эвристике скорости. В воде гасим погружение (vy<=0 -> 0), но не
-// тянем вверх; прыжок из воды оставляем рабочим.
+// плюс узкий фолбэк по устойчивому медленному погружению (вода тормозит
+// падение). Гасим погружение (vy<=0 -> 0), не тянем вверх; прыжок работает.
+// Активность разделяем с пост-тиком, чтобы перебить водную физику движка.
+std::atomic<bool> g_jesusActive{false};
+thread_local float g_jesusPreY = 0.0f;
+thread_local bool g_jesusPreValid = false;
+
 void applyJesus(ActorState &s, bool onGround) {
-  if (onGround) return;
-  if (!gameecs::inWater(s.actor)) return;
+  static thread_local int streak = 0;
+  if (onGround) {
+    streak = 0;
+    g_jesusActive.store(false, std::memory_order_relaxed);
+    return;
+  }
+
+  const bool inWater = gameecs::inWater(s.actor);
+  const float vy = s.velocity[1];
+  if (vy < 0.0f && vy > -0.10f) {
+    ++streak;
+  } else if (!inWater) {
+    streak = 0;
+  }
+  const bool active = inWater || streak >= 2;
+  if (!active) {
+    g_jesusActive.store(false, std::memory_order_relaxed);
+    return;
+  }
 
   gameecs::MoveInputState moveInput;
   const bool haveInput = gameecs::readMoveInput(s.actor, moveInput);
   if (haveInput && moveInput.jumping) {
+    g_jesusActive.store(false, std::memory_order_relaxed);
     return;  // можно выпрыгнуть
   }
 
-  const float vy = s.velocity[1];
   if (vy < 0.0f) {
     s.velocity[1] = 0.0f;  // стоим на поверхности, не тонем
     g_cheatingPublished.store(true, std::memory_order_relaxed);
   }
+  g_jesusActive.store(true, std::memory_order_relaxed);
 }
 
 // ItemStack пригоден для установки: валиден и непуст.
@@ -561,12 +594,14 @@ bool usableHeldItem(void *item) {
   return count > 0;
 }
 
-// Scaffold: ставит блок под собой (mode 0) или мост впереди (mode 1).
+// Scaffold: ставит блок в целевую клетку, перебирая 6 соседних блоков как
+// опору (клик по грани соседа, обращённой к цели). Так работает и «башня» под
+// собой (при прыжке/падении опора — блок под ногами/уступ), и мост вперёд.
 // Использует штатный GameMode::useItemOn с реальным ItemStack из руки, поэтому
 // транзакция и предсказание идут обычным путём и сервер принимает блок.
-void applyScaffold(ActorState &s, int tick) {
-  const int step = std::max(2, g_scaffoldInterval.load(std::memory_order_relaxed) + 1);
-  if ((tick % step) != 0) return;
+void applyScaffold(ActorState &s, int tick, bool onGround) {
+  const int step = std::max(1, g_scaffoldInterval.load(std::memory_order_relaxed));
+  if (step > 1 && (tick % step) != 0) return;
 
   UseItemOnFn useItemOn = g_useItemOn.load(std::memory_order_relaxed);
   if (!useItemOn) return;
@@ -577,78 +612,92 @@ void applyScaffold(ActorState &s, int tick) {
       reinterpret_cast<char *>(client) + kClientInstanceGameMode);
   if (gmPtr < 0x1000 || (gmPtr & 0x7) != 0) return;
 
-  // Грани Bedrock: 0=DOWN,1=UP,2=NORTH(-Z),3=SOUTH(+Z),4=WEST(-X),5=EAST(+X).
-  // useItemOn ставит блок на грань указанного блока, поэтому кликаем блок ПОД
-  // ногами (он обычно твёрдый): верхнюю грань — «башня» под собой, боковую —
-  // мост в сторону движения.
-  const int baseX = static_cast<int>(std::floor(s.position[0]));
-  const int baseZ = static_cast<int>(std::floor(s.position[2]));
-  const int baseY = static_cast<int>(std::floor(s.position[1])) - 1;
-
-  // Направление движения для «моста».
-  float dx = s.velocity[0];
-  float dz = s.velocity[2];
-  if (horizontalLength(dx, dz) < 0.02f && s.rotation) {
-    const float yawRad = s.rotation[1] * 3.14159265f / 180.0f;
-    dx = -std::sin(yawRad);
-    dz = std::cos(yawRad);
-  }
-  int moveFace;
-  if (std::fabs(dx) >= std::fabs(dz)) {
-    moveFace = (dx >= 0.0f) ? 5 : 4;  // EAST / WEST
-  } else {
-    moveFace = (dz >= 0.0f) ? 3 : 2;  // SOUTH / NORTH
-  }
-
   if (g_scaffoldRotate.load(std::memory_order_relaxed) && s.rotation) {
     const float pitch = g_scaffoldPitch.load(std::memory_order_relaxed);
     s.rotation[0] = std::max(-90.0f, std::min(-pitch, 0.0f));
   }
 
-  // Предмет из руки: сначала последний реально использованный (точный слот
-  // хотбара), затем контейнеры экипировки (слот 0/1, разные сборки хранят
-  // основную руку то в +0x00, то в +0x10). Всё строго валидируется.
-  void *item = g_capturedItem.load(std::memory_order_relaxed);
-  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x00, 0);
-  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x00, 1);
-  if (!usableHeldItem(item)) item = gameecs::equipmentItemStack(s.actor, 0x10, 0);
-  if (!usableHeldItem(item)) return;
+  // Кандидаты предмета для установки: последний реально использованный, затем
+  // слоты контейнеров рук (0x00/0x10). Перебираем до 4 — какой реально
+  // поставит блок, тот и используется (не зависит от точной раскладки
+  // EquipmentComponent). Всё валидируется, мусор в useItemOn не уходит.
+  void *candidates[4] = {nullptr, nullptr, nullptr, nullptr};
+  int candidateCount = 0;
+  auto addCandidate = [&](void *it) {
+    if (!usableHeldItem(it) || candidateCount >= 4) return;
+    for (int i = 0; i < candidateCount; ++i) {
+      if (candidates[i] == it) return;
+    }
+    candidates[candidateCount++] = it;
+  };
+  addCandidate(g_capturedItem.load(std::memory_order_relaxed));
+  const unsigned long handOffsets[2] = {0x00, 0x10};
+  for (int oi = 0; oi < 2; ++oi) {
+    for (int slot = 0; slot < 4; ++slot) {
+      addCandidate(gameecs::equipmentItemStack(s.actor, handOffsets[oi], slot));
+    }
+  }
+  if (candidateCount == 0) return;
+
+  // Целевая клетка, куда ставим блок.
+  const int feetX = static_cast<int>(std::floor(s.position[0]));
+  const int feetY = static_cast<int>(std::floor(s.position[1]));
+  const int feetZ = static_cast<int>(std::floor(s.position[2]));
+  int tx = feetX;
+  int ty = feetY - 1;   // клетка прямо под ногами — «башня»/ловля падения
+  int tz = feetZ;
+  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
+  if (mode == 0 && onGround) return;  // на земле под собой ставить нечего
+  if (mode == 1) {
+    ty = feetY - 1;     // мост на уровне пола
+    float dx = s.velocity[0];
+    float dz = s.velocity[2];
+    if (horizontalLength(dx, dz) < 0.02f && s.rotation) {
+      const float yawRad = s.rotation[1] * 3.14159265f / 180.0f;
+      dx = -std::sin(yawRad);
+      dz = std::cos(yawRad);
+    }
+    if (std::fabs(dx) >= std::fabs(dz)) {
+      tx += (dx >= 0.0f) ? 1 : -1;
+    } else {
+      tz += (dz >= 0.0f) ? 1 : -1;
+    }
+  }
 
   struct BlockPos {
     int32_t x;
     int32_t y;
     int32_t z;
-  } below{baseX, baseY, baseZ};
+  };
 
-  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
+  // 6 направлений к соседу и грань соседа, обращённая к цели.
+  // d=+Y -> DOWN(0), -Y -> UP(1), +Z -> NORTH(2), -Z -> SOUTH(3),
+  // +X -> WEST(4), -X -> EAST(5).
+  static const int dn[6][3] = {{0, 1, 0},  {0, -1, 0}, {0, 0, 1},
+                               {0, 0, -1}, {1, 0, 0},  {-1, 0, 0}};
+  static const uint8_t face[6] = {0, 1, 2, 3, 4, 5};
+
   bool placed = false;
-  int usedFace = moveFace;
-  if (mode == 0) {
-    // «Под собой»: ставим на верхнюю грань блока под ногами (работает в
-    // прыжке/падении — блок появляется под игроком).
-    usedFace = 1;
-    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below, 1);
-  } else {
-    // «Мост»: кликаем боковую грань блока под ногами в сторону движения.
-    usedFace = moveFace;
-    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below,
-                       static_cast<uint8_t>(moveFace));
-  }
-  if (!placed) {
-    // Резерв: другой вариант (мост <-> башня).
-    usedFace = (mode == 0) ? moveFace : 1;
-    placed = useItemOn(reinterpret_cast<void *>(gmPtr), item, &below,
-                       static_cast<uint8_t>(usedFace));
+  void *usedItem = nullptr;
+  for (int c = 0; c < candidateCount && !placed; ++c) {
+    for (int k = 0; k < 6 && !placed; ++k) {
+      BlockPos ref{tx + dn[k][0], ty + dn[k][1], tz + dn[k][2]};
+      placed =
+          useItemOn(reinterpret_cast<void *>(gmPtr), candidates[c], &ref,
+                    face[k]);
+      if (placed) usedItem = candidates[c];
+    }
   }
 
   if (g_debug.load(std::memory_order_relaxed)) {
     static uint32_t s_log = 0;
-    if ((s_log++ % 10) == 0) {
+    if ((s_log++ % 6) == 0) {
       __android_log_print(ANDROID_LOG_INFO, kTag,
-                          "scaffold click (%d,%d,%d) face=%d placed=%d "
-                          "gm=%p item=%p",
-                          baseX, baseY, baseZ, usedFace, placed ? 1 : 0,
-                          reinterpret_cast<void *>(gmPtr), item);
+                          "scaffold target (%d,%d,%d) placed=%d gm=%p "
+                          "item=%p cands=%d",
+                          tx, ty, tz, placed ? 1 : 0,
+                          reinterpret_cast<void *>(gmPtr), usedItem,
+                          candidateCount);
     }
   }
 }
@@ -686,8 +735,12 @@ void applyFeatures(void *actor) {
 
   if (autoJump) applyAutoJump(state, tick, onGround);
   if (fly) applyFly(state, onGround);
-  if (jesus) applyJesus(state, onGround);
-  if (scaffold) applyScaffold(state, tick);
+  if (jesus) {
+    applyJesus(state, onGround);
+    g_jesusPreY = state.position[1];
+    g_jesusPreValid = g_jesusActive.load(std::memory_order_relaxed);
+  }
+  if (scaffold) applyScaffold(state, tick, onGround);
 
   if (g_debug.load(std::memory_order_relaxed)) {
     static uint32_t s_log = 0;
@@ -710,21 +763,85 @@ void resetFeatures() {
   g_lastAutoJumpTick = -100;
 }
 
-// Движение гоняем из LocalPlayer::normalTick, без отдельного хука vtable[25]
-// Actor::baseTick: тот же слот хукает Speed-модуль, и двойной перехват одного
-// адреса из разных .so приводил к падениям. normalTick вызывается каждый тик
-// до интеграции движения, поэтому записи velocity применяются корректно.
+// Применяем движение в Actor::baseTick через vtable[25] — именно там Bedrock
+// интегрирует velocity. Без этого записи из normalTick затираются физикой
+// (поэтому Jesus/AutoJump «ничего не делали»). Так же делает Speed-модуль;
+// pl::memory::hook поддерживает цепочку, так что двойной перехват безопасен.
+void applyMovementPost(void *actor) {
+  if (!actor) return;
+  if (g_releaseJump.exchange(false, std::memory_order_relaxed)) {
+    gameecs::setMoveJumping(actor, false);
+  }
+  if (!g_jesusEnabled.load(std::memory_order_relaxed)) return;
+  if (!g_jesusActive.load(std::memory_order_relaxed)) return;
+  ActorState state;
+  if (!readState(actor, state)) return;
+  if (state.velocity[1] < 0.0f) {
+    state.velocity[1] = 0.0f;
+  }
+  // Водная физика движка за тик слегка утягивает вниз — возвращаем Y на
+  // уровень входа (пока просадка небольшая). Так реально стоишь на воде, а не
+  // медленно тонешь. Большую просадку (вход в воду сверху) не трогаем.
+  if (g_jesusPreValid) {
+    const float dy = g_jesusPreY - state.position[1];
+    if (dy > 0.0f && dy < 0.15f) {
+      state.position[1] = g_jesusPreY;
+    }
+  }
+}
+
+void baseTickDetour(void *actor) {
+  void *localPlayer = g_localPlayer.load(std::memory_order_relaxed);
+  const bool isLocal = localPlayer && actor == localPlayer;
+  if (isLocal) applyFeatures(actor);
+  if (g_baseTickOriginal) g_baseTickOriginal(actor);
+  if (isLocal) applyMovementPost(actor);
+}
+
+bool installBaseTickHook(void *localPlayer) {
+  if (g_baseTickHookInstalled) return true;
+  if (g_baseTickHookAttempted || !localPlayer) return false;
+  g_baseTickHookAttempted = true;
+
+  auto **vtable = *reinterpret_cast<void ***>(localPlayer);
+  if (!vtable) return false;
+
+  const uintptr_t baseTick = reinterpret_cast<uintptr_t>(vtable[25]);
+  if (!baseTick || baseTick == g_normalTickAddress) return false;
+  if (!isMinecraftAddress(baseTick)) return false;
+  if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(baseTick),
+                       reinterpret_cast<pl::memory::FuncPtr>(baseTickDetour),
+                       reinterpret_cast<pl::memory::FuncPtr *>(
+                           &g_baseTickOriginal)) != 0) {
+    logWarning("Unable to hook Actor::baseTick");
+    return false;
+  }
+
+  g_baseTickAddress = baseTick;
+  g_baseTickHookInstalled = true;
+  logInfo("Actor::baseTick hooked (vtable[25])");
+  return true;
+}
+
 void normalTickDetour(void *actor) {
   if (actor) {
     void *clientLocal = g_clientLocalPlayer.load(std::memory_order_relaxed);
     if (!clientLocal || actor == clientLocal) {
       g_localPlayer.exchange(actor, std::memory_order_acq_rel);
     }
+    if (!g_baseTickHookInstalled && !g_baseTickHookAttempted) {
+      installBaseTickHook(actor);
+    }
   }
 
   void *local = g_localPlayer.load(std::memory_order_relaxed);
-  if (!local || actor == local) applyFeatures(actor);
+  if (!g_baseTickHookInstalled && (!local || actor == local)) {
+    applyFeatures(actor);
+  }
   if (g_normalTickOriginal) g_normalTickOriginal(actor);
+  if (!g_baseTickHookInstalled && (!local || actor == local)) {
+    applyMovementPost(actor);
+  }
 }
 
 void *clientInstanceUpdateDetour(void *clientInstance, bool value) {
@@ -741,6 +858,7 @@ void *clientInstanceUpdateDetour(void *clientInstance, bool value) {
       void *previous =
           g_localPlayer.exchange(localPlayer, std::memory_order_acq_rel);
       if (localPlayer != previous) resetFeatures();
+      installBaseTickHook(localPlayer);
     } else {
       if (g_localPlayer.exchange(nullptr, std::memory_order_acq_rel)) {
         resetFeatures();

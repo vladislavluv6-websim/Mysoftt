@@ -682,7 +682,7 @@ public final class InbuiltModuleProvider {
             configs.add(config(CFG_AUTO_JUMP_HEIGHT,
                     context.getString(R.string.mod_config_autojump_height),
                     UnifiedMod.ConfigType.SLIDER_INT,
-                    "125", "20", "400",
+                    "125", "20", "2000",
                     String.valueOf(manager.getAutoJumpHeightRaw())));
             configs.add(config(CFG_AUTO_JUMP_MODE,
                     context.getString(R.string.mod_config_autojump_mode),

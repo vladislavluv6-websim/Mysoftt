@@ -22,6 +22,11 @@ public class LogcatOverlayManager {
         this.app = app;
         registerLifecycleCallbacks();
         registerSettingsListener();
+        // Диагностическая сборка: лог-оверлей с кнопкой «Сохранить логи» включён.
+        try {
+            FeatureSettings.getInstance().setLogcatOverlayEnabled(true);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static void init(Application app) {

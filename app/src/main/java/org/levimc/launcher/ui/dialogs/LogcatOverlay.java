@@ -65,7 +65,7 @@ public class LogcatOverlay extends FrameLayout {
     private ListPopupWindow levelPopup;
     private View filterBar;
     private ImageButton pauseButton, clearButton, autoScrollButton, closeButton, minimizeBubble;
-    private ImageButton filterButton, filterClearButton;
+    private ImageButton filterButton, filterClearButton, exportButton;
     private View overlayHeader, bottomResizeBar, cornerBottomLeft, cornerBottomRight;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -117,6 +117,7 @@ public class LogcatOverlay extends FrameLayout {
         minimizeBubble = findViewById(R.id.minimize_bubble);
         filterButton = findViewById(R.id.btn_filter);
         filterClearButton = findViewById(R.id.btn_filter_clear);
+        exportButton = findViewById(R.id.btn_export);
         overlayHeader = findViewById(R.id.overlay_header);
         bottomResizeBar = findViewById(R.id.bottom_resize_bar);
         cornerBottomLeft = findViewById(R.id.corner_bottom_left);
@@ -145,6 +146,9 @@ public class LogcatOverlay extends FrameLayout {
     }
 
     private void setupUiListeners() {
+        if (exportButton != null) {
+            exportButton.setOnClickListener(v -> exportLogs());
+        }
         clearButton.setOnClickListener(v -> {
             synchronized (logBuffer) { logBuffer.clear(); }
             pendingLines.clear();
@@ -409,6 +413,79 @@ public class LogcatOverlay extends FrameLayout {
         pendingLines.clear();
         ioExecutor.shutdownNow();
         renderLoopStarted = false;
+    }
+
+    private String runLogcatDump(boolean ownPid) {
+        try {
+            List<String> cmd = new ArrayList<>();
+            cmd.add("logcat");
+            cmd.add("-d");
+            cmd.add("-v");
+            cmd.add("threadtime");
+            if (ownPid) {
+                cmd.add("--pid");
+                cmd.add(String.valueOf(android.os.Process.myPid()));
+            } else {
+                cmd.add("-s");
+                cmd.add("MovementMod:V");
+                cmd.add("AimAssistMod:V");
+                cmd.add("AndroidRuntime:E");
+                cmd.add("DEBUG:E");
+            }
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line).append('\n');
+            }
+            p.waitFor();
+            return sb.toString();
+        } catch (Throwable e) {
+            return "-- logcat failed: " + e + "\n";
+        }
+    }
+
+    private void exportLogs() {
+        final Context ctx = getContext();
+        new Thread(() -> {
+            try {
+                StringBuilder sb = new StringBuilder();
+                sb.append("=== LeviLauncher logs ===\n");
+                sb.append("--- own pid ---\n");
+                sb.append(runLogcatDump(true));
+                sb.append("--- MovementMod tag ---\n");
+                sb.append(runLogcatDump(false));
+                String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                        .format(new java.util.Date());
+                String name = "levi_logs_" + ts + ".txt";
+                byte[] bytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+                File written = null;
+                File[] dirs = new File[]{new File("/sdcard/Download"),
+                        ctx.getExternalFilesDir(null), ctx.getFilesDir()};
+                for (File dir : dirs) {
+                    if (dir == null) continue;
+                    try {
+                        if (!dir.exists()) dir.mkdirs();
+                        File candidate = new File(dir, name);
+                        try (FileOutputStream fos = new FileOutputStream(candidate)) {
+                            fos.write(bytes);
+                        }
+                        written = candidate;
+                        break;
+                    } catch (Throwable ignored) {
+                    }
+                }
+                if (written == null) throw new java.io.IOException("no writable directory");
+                final String path = written.getAbsolutePath();
+                mainHandler.post(() -> Toast.makeText(ctx,
+                        ctx.getString(R.string.logcat_export_saved, path),
+                        Toast.LENGTH_LONG).show());
+            } catch (Throwable e) {
+                final String msg = e.toString();
+                mainHandler.post(() -> Toast.makeText(ctx, "Export failed: " + msg,
+                        Toast.LENGTH_LONG).show());
+            }
+        }, "LogcatExport").start();
     }
 
     private void startReader() {

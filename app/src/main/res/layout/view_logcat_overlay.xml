@@ -60,6 +60,15 @@
                 android:src="@android:drawable/ic_menu_delete" />
 
             <ImageButton
+                android:id="@+id/btn_export"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/logcat_export"
+                android:tint="@android:color/white"
+                android:src="@android:drawable/ic_menu_save" />
+
+            <ImageButton
                 android:id="@+id/btn_close"
                 android:layout_width="32dp"
                 android:layout_height="32dp"

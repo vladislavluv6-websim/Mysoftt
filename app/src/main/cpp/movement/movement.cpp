@@ -66,9 +66,21 @@ constexpr uintptr_t kClientInstanceGameMode = 0xA08;
 // что и обычная установка, поэтому сервер принимает блок.
 constexpr uintptr_t kUseItemOnFileOffset = 0x100a059c;
 
-// PlayerAuthInputPacket::write (0x90) — нужен только для бита START_JUMPING,
-// чтобы AutoJump выглядел как настоящий ввод прыжка.
+// Сигнатуры (проверены на 1.26.60.4, уникальны). Резолвим по байтам, а не по
+// gameBase+offset: библиотека мапится прелоадером так, что dladdr не отдаёт
+// базу (она была 0), из-за чего все фиксированные оффсеты промахивались.
+constexpr const char *kUseItemOnSignature =
+    "FF C3 03 D1 FD 7B 0B A9 F7 63 00 F9 F6 57 0D A9 F4 4F 0E A9 FD C3 02 91 "
+    "57 D0 3B D5 F6 03 00 AA E0 43 00 91 E8 16 40 F9 F4 03 03 2A F5 03 02 AA";
+
+// PlayerAuthInputPacket::write (0x90) — бит START_JUMPING для AutoJump.
 constexpr uintptr_t kPlayerAuthInputWriteOffset = 0xdaa4864;
+constexpr const char *kPacketWriteSignature =
+    "FD 7B BC A9 FC 5F 01 A9 F6 57 02 A9 F4 4F 03 A9 FD 03 00 91 FF 03 0E D1 "
+    "57 D0 3B D5 F6 03 03 AA F4 03 02 AA E8 16 40 F9 F3 03 00 AA F5 03 01 AA "
+    "A8 83 1F F8 08 00 40 F9 08 09 40 F9 00 01 3F D6 68 02 40 F9 E0 03 13 AA "
+    "08 35 40 F9 00 01 3F D6 DF 1E 60 F2 08 00 96 1A 1F 15 00 71 41 08 00 54 "
+    "E0 03 00 91 E1 03 15 AA BC 55 E9 97 E0 83 00 91";
 constexpr uintptr_t kPacketInputData = 0x88;
 constexpr int kInputStartJumping = 31;
 
@@ -255,16 +267,14 @@ bool useItemOnDetour(void *gameMode, void *item, void *blockPos, uint8_t face) {
              : false;
 }
 
-bool installUseItemOnHook(uintptr_t gameBase) {
+bool installUseItemOnHook(uintptr_t address) {
   if (g_useItemOnOriginal) return true;
-  if (gameBase == 0) return false;
-  const uintptr_t address = gameBase + kUseItemOnFileOffset;
-  // sub sp, sp, #0xf0 (пролог GameMode::useItemOn в 1.26.60.04)
+  if (address == 0) return false;
   static const unsigned char kPrologue[4] = {0xff, 0xc3, 0x03, 0xd1};
   if (!readableMemory(address, sizeof(kPrologue)) ||
       std::memcmp(reinterpret_cast<const void *>(address), kPrologue,
                   sizeof(kPrologue)) != 0) {
-    logWarning("GameMode::useItemOn prologue mismatch (unsupported build)");
+    logWarning("GameMode::useItemOn signature resolved but bytes mismatch");
     return false;
   }
   if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(address),
@@ -291,17 +301,14 @@ void *packetWriteDetour(void *packet, void *a1, void *a2, void *a3) {
              : nullptr;
 }
 
-bool installPacketHook(uintptr_t gameBase) {
+bool installPacketHook(uintptr_t address) {
   if (g_packetHookInstalled) return true;
-  if (gameBase == 0) return false;
-  const uintptr_t address = gameBase + kPlayerAuthInputWriteOffset;
-  static const unsigned char kPrologue[16] = {
-      0xfd, 0x7b, 0xbc, 0xa9, 0xf7, 0x0b, 0x00, 0xf9,
-      0xf6, 0x57, 0x02, 0xa9, 0xf4, 0x4f, 0x03, 0xa9};
+  if (address == 0) return false;
+  static const unsigned char kPrologue[4] = {0xfd, 0x7b, 0xbc, 0xa9};
   if (!readableMemory(address, sizeof(kPrologue)) ||
       std::memcmp(reinterpret_cast<const void *>(address), kPrologue,
                   sizeof(kPrologue)) != 0) {
-    logWarning("PlayerAuthInput::write prologue mismatch");
+    logWarning("PlayerAuthInput::write signature resolved but bytes mismatch");
     return false;
   }
   if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(address),
@@ -584,6 +591,16 @@ void applyJesus(ActorState &s, bool onGround) {
     }
   }
 
+  static uint32_t s_jlog = 0;
+  if (s_jlog < 40 && !onGround) {
+    ++s_jlog;
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag,
+        "jesus inWater=%d streak=%d vy=%.3f active=%d onGround=%d",
+        gameecs::inWater(s.actor) ? 1 : 0, sinkStreak,
+        static_cast<double>(vy), active ? 1 : 0, onGround ? 1 : 0);
+  }
+
   if (!active) {
     g_jesusActive.store(false, std::memory_order_relaxed);
     return;
@@ -848,11 +865,23 @@ bool installBaseTickHook(void *localPlayer) {
   g_baseTickHookAttempted = true;
 
   auto **vtable = *reinterpret_cast<void ***>(localPlayer);
-  if (!vtable) return false;
+  if (!vtable) {
+    logWarning("baseTick: player vtable is null");
+    return false;
+  }
 
   const uintptr_t baseTick = reinterpret_cast<uintptr_t>(vtable[25]);
-  if (!baseTick || baseTick == g_normalTickAddress) return false;
-  if (!isMinecraftAddress(baseTick)) return false;
+  if (!baseTick || baseTick == g_normalTickAddress) {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "baseTick: vtable[25]=%p invalid (normalTick=%p)",
+                        reinterpret_cast<void *>(baseTick),
+                        reinterpret_cast<void *>(g_normalTickAddress));
+    return false;
+  }
+  if (!isMinecraftAddress(baseTick)) {
+    logWarning("baseTick: vtable[25] not in minecraft");
+    return false;
+  }
   if (pl::memory::hook(reinterpret_cast<pl::memory::FuncPtr>(baseTick),
                        reinterpret_cast<pl::memory::FuncPtr>(baseTickDetour),
                        reinterpret_cast<pl::memory::FuncPtr *>(
@@ -982,10 +1011,27 @@ bool initialize() {
     g_gameBase = reinterpret_cast<uintptr_t>(info.dli_fbase);
   }
 
-  if (!installUseItemOnHook(g_gameBase)) {
+  // Основной путь — по сигнатурам (не зависит от базы/маппинга прелоадера).
+  uintptr_t useItemOnAddress =
+      pl::memory::resolveSignature(kUseItemOnSignature, kMinecraftLibrary);
+  if (!useItemOnAddress && g_gameBase) {
+    useItemOnAddress = g_gameBase + kUseItemOnFileOffset;
+  }
+  uintptr_t packetAddress =
+      pl::memory::resolveSignature(kPacketWriteSignature, kMinecraftLibrary);
+  if (!packetAddress && g_gameBase) {
+    packetAddress = g_gameBase + kPlayerAuthInputWriteOffset;
+  }
+  __android_log_print(ANDROID_LOG_INFO, kTag,
+                      "resolved useItemOn=%p packetWrite=%p base=%p",
+                      reinterpret_cast<void *>(useItemOnAddress),
+                      reinterpret_cast<void *>(packetAddress),
+                      reinterpret_cast<void *>(g_gameBase));
+
+  if (!installUseItemOnHook(useItemOnAddress)) {
     logWarning("Scaffold placement disabled (useItemOn hook failed)");
   }
-  if (!installPacketHook(g_gameBase)) {
+  if (!installPacketHook(packetAddress)) {
     logWarning("AutoJump input bit disabled (packet hook failed)");
   }
 

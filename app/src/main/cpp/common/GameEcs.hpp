@@ -28,6 +28,11 @@ bool readMoveInput(void *actor, MoveInputState &out);
 bool setMoveSprinting(void *actor, bool value);
 bool setMoveJumping(void *actor, bool value);
 
+// Указатель на ItemStack из контейнера экипировки (slot 0). containerOffset —
+// смещение указателя на контейнер внутри EquipmentComponent (0x00 — рука,
+// 0x10 — альтернативный контейнер в некоторых сборках). nullptr если нет.
+void *equipmentItemStack(void *actor, unsigned long containerOffset);
+
 bool hasArmor(void *actor);
 int armorPieceCount(void *actor);
 std::uint32_t armorMaterialMask(void *actor);

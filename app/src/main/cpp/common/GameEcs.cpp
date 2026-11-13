@@ -415,6 +415,27 @@ float readHealth(void *actor) {
   return health < 0.0f ? 0.0f : health;
 }
 
+void *equipmentItemStack(void *actor, unsigned long containerOffset) {
+  void *equipment = componentFor(actor, kHashEquipment);
+  if (!equipment) return nullptr;
+  const auto base = reinterpret_cast<uintptr_t>(equipment);
+  uintptr_t container = 0;
+  if (!readValue(base + containerOffset, container) || container < 0x1000) {
+    return nullptr;
+  }
+  uintptr_t begin = 0;
+  uintptr_t end = 0;
+  if (!readValue(container + kContainerItems, begin) ||
+      !readValue(container + kContainerItems + sizeof(void *), end)) {
+    return nullptr;
+  }
+  if (begin < 0x1000 || end <= begin ||
+      (end - begin) < static_cast<uintptr_t>(kStackSize)) {
+    return nullptr;
+  }
+  return reinterpret_cast<void *>(begin);
+}
+
 std::string offhandItemName(void *actor) {
   void *equipment = componentFor(actor, kHashEquipment);
   if (!equipment) return {};

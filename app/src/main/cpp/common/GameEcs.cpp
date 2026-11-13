@@ -427,12 +427,12 @@ float readHealth(void *actor) {
   return health < 0.0f ? 0.0f : health;
 }
 
-void *equipmentItemStack(void *actor, unsigned long containerOffset,
-                         int slot) {
-  if (slot < 0) return nullptr;
-  void *equipment = componentFor(actor, kHashEquipment);
-  if (!equipment) return nullptr;
-  const auto base = reinterpret_cast<uintptr_t>(equipment);
+namespace {
+
+void *itemStackFromComponent(void *component, unsigned long containerOffset,
+                             int slot) {
+  if (!component || slot < 0) return nullptr;
+  const auto base = reinterpret_cast<uintptr_t>(component);
   uintptr_t container = 0;
   if (!readValue(base + containerOffset, container) || container < 0x1000) {
     return nullptr;
@@ -448,6 +448,21 @@ void *equipmentItemStack(void *actor, unsigned long containerOffset,
   if (static_cast<size_t>(slot) >= slots) return nullptr;
   return reinterpret_cast<void *>(begin +
                                   static_cast<uintptr_t>(slot) * kStackSize);
+}
+
+} // namespace
+
+void *equipmentItemStack(void *actor, unsigned long containerOffset,
+                         int slot) {
+  return itemStackFromComponent(componentFor(actor, kHashEquipment),
+                                containerOffset, slot);
+}
+
+void *componentItemStack(void *actor, unsigned int componentHash,
+                         unsigned long containerOffset, int slot) {
+  return itemStackFromComponent(
+      componentFor(actor, static_cast<entt::id_type>(componentHash)),
+      containerOffset, slot);
 }
 
 std::string offhandItemName(void *actor) {

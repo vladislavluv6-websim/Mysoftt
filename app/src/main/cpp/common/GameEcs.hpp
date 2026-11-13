@@ -39,6 +39,11 @@ bool setMoveJumping(void *actor, bool value);
 void *equipmentItemStack(void *actor, unsigned long containerOffset,
                          int slot);
 
+// ItemStack из произвольного компонента-контейнера (hash — entt-хеш типа
+// компонента, containerOffset — смещение указателя на Container).
+void *componentItemStack(void *actor, unsigned int componentHash,
+                         unsigned long containerOffset, int slot);
+
 bool hasArmor(void *actor);
 int armorPieceCount(void *actor);
 std::uint32_t armorMaterialMask(void *actor);

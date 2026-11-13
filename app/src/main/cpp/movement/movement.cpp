@@ -122,6 +122,7 @@ std::atomic<void *> g_clientInstance{nullptr};
 std::atomic<UseItemOnFn> g_useItemOn{nullptr};
 std::atomic<void *> g_capturedItem{nullptr};
 std::atomic<int> g_jumpBitTicks{0};
+std::atomic<bool> g_autoJumpMask{false};
 std::atomic<bool> g_releaseJump{false};
 
 uintptr_t g_gameBase = 0;
@@ -484,15 +485,21 @@ void applyAutoJump(ActorState &s, int tick, bool onGround) {
   if (h < 0.2f) h = 0.2f;
   if (h > 20.0f) h = 20.0f;  // до 20 блоков
 
-  // v = 0.42 * sqrt(h / 1.25): при h=1.25 скорость ровно ванильная.
-  const float v = 0.42f * std::sqrt(h / 1.25f);
-  s.velocity[1] = v;
-
-  if (autoJumpMode && !manualEdge) {
-    // Настоящий ввод прыжка -> START_JUMPING уходит штатно, не «фантомно».
+  const bool autoMode = autoJumpMode && !manualEdge;
+  if (autoMode) {
+    // Авто-режим: настоящий ввод прыжка (MoveInput), не «прыжок без ввода».
     gameecs::setMoveJumping(s.actor, true);
     g_releaseJump.store(true, std::memory_order_relaxed);
-    g_jumpBitTicks.store(1, std::memory_order_relaxed);
+  }
+
+  // ВАЖНО для обхода: на ванильной высоте (1.25) НИЧЕГО не трогаем — это
+  // обычный прыжок игры, полностью неотличим от ванильного. Скорость пишем
+  // только когда высота отличается, и тогда маскируем прыжок отменой
+  // серверных коррекций, пока игрок в воздухе (иначе предсказание сервера
+  // не совпадёт с нашей высотой и будет резинить/детектить).
+  if (std::fabs(h - 1.25f) > 0.03f) {
+    s.velocity[1] = 0.42f * std::sqrt(h / 1.25f);
+    g_autoJumpMask.store(true, std::memory_order_relaxed);
   }
   g_lastAutoJumpTick = tick;
 }
@@ -550,21 +557,33 @@ thread_local float g_jesusPreY = 0.0f;
 thread_local bool g_jesusPreValid = false;
 
 void applyJesus(ActorState &s, bool onGround) {
-  static thread_local int streak = 0;
+  static thread_local int sinkStreak = 0;
+  const float vy = s.velocity[1];
+  bool active = g_jesusActive.load(std::memory_order_relaxed);
+
   if (onGround) {
-    streak = 0;
-    g_jesusActive.store(false, std::memory_order_relaxed);
-    return;
+    sinkStreak = 0;
+    active = false;
+  } else if (!active) {
+    if (gameecs::inWater(s.actor)) {
+      active = true;              // ECS подтвердил воду — сразу
+      sinkStreak = 0;
+    } else if (vy < 0.0f && vy > -0.30f) {
+      // Вода тормозит падение: vy держится небольшим отрицательным много
+      // тиков. На суше в этой зоне бывает лишь ~3 тика у апекса прыжка,
+      // порог 4 отсекает ложные срабатывания.
+      if (++sinkStreak >= 4) active = true;
+    } else {
+      sinkStreak = 0;
+    }
+  } else {
+    // Гистерезис: держимся, пока не вышли из «водного» диапазона.
+    if (vy < -0.40f || vy > 0.25f) {
+      active = false;
+      sinkStreak = 0;
+    }
   }
 
-  const bool inWater = gameecs::inWater(s.actor);
-  const float vy = s.velocity[1];
-  if (vy < 0.0f && vy > -0.10f) {
-    ++streak;
-  } else if (!inWater) {
-    streak = 0;
-  }
-  const bool active = inWater || streak >= 2;
   if (!active) {
     g_jesusActive.store(false, std::memory_order_relaxed);
     return;
@@ -617,24 +636,39 @@ void applyScaffold(ActorState &s, int tick, bool onGround) {
     s.rotation[0] = std::max(-90.0f, std::min(-pitch, 0.0f));
   }
 
-  // Кандидаты предмета для установки: последний реально использованный, затем
-  // слоты контейнеров рук (0x00/0x10). Перебираем до 4 — какой реально
-  // поставит блок, тот и используется (не зависит от точной раскладки
-  // EquipmentComponent). Всё валидируется, мусор в useItemOn не уходит.
+  // Кандидаты предмета: последний реально использованный, слоты контейнеров
+  // рук (ActorEquipmentComponent), и на всякий случай инвентарь
+  // (PlayerInventoryComponent/InventoryComponent) по нескольким смещениям
+  // контейнера. Перебираем до 4; какой реально поставит блок — тот и рабочий.
+  // Всё валидируется (читаемость + vtable), мусор в useItemOn не уходит.
+  constexpr unsigned kHashPlayerInv = 0x02AF4C23u;
+  constexpr unsigned kHashInventory = 0x883338DAu;
+
   void *candidates[4] = {nullptr, nullptr, nullptr, nullptr};
   int candidateCount = 0;
   auto addCandidate = [&](void *it) {
-    if (!usableHeldItem(it) || candidateCount >= 4) return;
+    if (candidateCount >= 4 || !usableHeldItem(it)) return;
     for (int i = 0; i < candidateCount; ++i) {
       if (candidates[i] == it) return;
     }
     candidates[candidateCount++] = it;
   };
+
   addCandidate(g_capturedItem.load(std::memory_order_relaxed));
   const unsigned long handOffsets[2] = {0x00, 0x10};
-  for (int oi = 0; oi < 2; ++oi) {
-    for (int slot = 0; slot < 4; ++slot) {
+  for (int oi = 0; oi < 2 && candidateCount < 4; ++oi) {
+    for (int slot = 0; slot < 4 && candidateCount < 4; ++slot) {
       addCandidate(gameecs::equipmentItemStack(s.actor, handOffsets[oi], slot));
+    }
+  }
+  const unsigned invHashes[2] = {kHashPlayerInv, kHashInventory};
+  const unsigned long invOffsets[4] = {0x00, 0x08, 0x10, 0x18};
+  for (int hi = 0; hi < 2 && candidateCount < 4; ++hi) {
+    for (int oi = 0; oi < 4 && candidateCount < 4; ++oi) {
+      for (int slot = 0; slot < 9 && candidateCount < 4; ++slot) {
+        addCandidate(gameecs::componentItemStack(
+            s.actor, invHashes[hi], invOffsets[oi], slot));
+      }
     }
   }
   if (candidateCount == 0) return;
@@ -689,16 +723,15 @@ void applyScaffold(ActorState &s, int tick, bool onGround) {
     }
   }
 
-  if (g_debug.load(std::memory_order_relaxed)) {
-    static uint32_t s_log = 0;
-    if ((s_log++ % 6) == 0) {
-      __android_log_print(ANDROID_LOG_INFO, kTag,
-                          "scaffold target (%d,%d,%d) placed=%d gm=%p "
-                          "item=%p cands=%d",
-                          tx, ty, tz, placed ? 1 : 0,
-                          reinterpret_cast<void *>(gmPtr), usedItem,
-                          candidateCount);
-    }
+  static uint32_t s_scaffoldLog = 0;
+  if (s_scaffoldLog < 30) {
+    ++s_scaffoldLog;
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "scaffold target (%d,%d,%d) placed=%d gm=%p "
+                        "item=%p cands=%d onGround=%d",
+                        tx, ty, tz, placed ? 1 : 0,
+                        reinterpret_cast<void *>(gmPtr), usedItem,
+                        candidateCount, onGround ? 1 : 0);
   }
 }
 
@@ -742,6 +775,16 @@ void applyFeatures(void *actor) {
   }
   if (scaffold) applyScaffold(state, tick, onGround);
 
+  // Маскировка нестандартного прыжка: пока в воздухе — гасим серверные
+  // коррекции, чтобы высоту не «резинило» и не детектило.
+  if (autoJump && g_autoJumpMask.load(std::memory_order_relaxed)) {
+    if (onGround) {
+      g_autoJumpMask.store(false, std::memory_order_relaxed);
+    } else {
+      g_cheatingPublished.store(true, std::memory_order_relaxed);
+    }
+  }
+
   if (g_debug.load(std::memory_order_relaxed)) {
     static uint32_t s_log = 0;
     if ((s_log++ % 40) == 0) {
@@ -760,6 +803,7 @@ void resetFeatures() {
   g_cheatingPublished.store(false, std::memory_order_relaxed);
   g_capturedItem.store(nullptr, std::memory_order_relaxed);
   g_jumpBitTicks.store(0, std::memory_order_relaxed);
+  g_autoJumpMask.store(false, std::memory_order_relaxed);
   g_lastAutoJumpTick = -100;
 }
 

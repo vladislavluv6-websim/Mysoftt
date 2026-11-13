@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Onyx Client - Minecraft Bedrock Mobile GUI</title>
+<style>
+:root {
+  --accent: #4B7EFF;
+  --accent-rgb: 75, 126, 255;
+  --accent-glow: rgba(75, 126, 255, 0.35);
+  --shell-bg: rgba(13, 15, 22, 0.95);
+  --sidebar-bg: rgba(18, 21, 30, 0.98);
+  --toolbar-bg: rgba(11, 13, 20, 0.96);
+  --card-bg: rgba(17, 19, 27, 0.92);
+  --card-border: #20232E;
+  --module-bg: #151822;
+  --module-hover: #1b1f2c;
+  --module-expanded: #161925;
+  --settings-bg: #10121a;
+  --control-bg: #181B25;
+  --divider: #1E222D;
+  --text-main: #E1E3EB;
+  --text-dim: #9499A8;
+  --text-faint: #5D6270;
+  --toggle-off: #20242E;
+  --toggle-thumb-off: #85909C;
+  --slider-track: #222632;
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #06070a;
+  font-family: var(--font-family);
+  color: var(--text-main);
+  touch-action: none;
+}
+
+/* Minecraft Bedrock Dark Ambient Background */
+.bedrock-bg {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 25%, #141a2e 0%, #070911 65%, #020305 100%);
+  z-index: 0;
+  overflow: hidden;
+}
+
+.bedrock-bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(75, 126, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(75, 126, 255, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.bedrock-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(2, 3, 5, 0.8) 100%);
+}
+
+/* Top Phone Simulator Controls */
+.top-sim-bar {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 18, 26, 0.92);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 4px 12px;
+  border-radius: 20px;
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+}
+
+.top-sim-bar select, .top-sim-bar button {
+  background: #1c212e;
+  border: 1px solid #2d3447;
+  color: var(--text-main);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+
+.top-sim-bar button:active {
+  transform: scale(0.96);
+}
+
+/* Floating Mobile Pill for Touchscreen Toggling */
+.mobile-pill-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 54px;
+  height: 54px;
+  border-radius: 27px;
+  background: rgba(13, 15, 22, 0.95);
+  border: 2px solid var(--accent);
+  box-shadow: 0 6px 24px var(--accent-glow), 0 2px 10px rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28), border-color 0.2s;
+}
+
+.mobile-pill-btn:active {
+  transform: scale(0.92);
+}
+
+.mobile-pill-btn span {
+  font-weight: 800;
+  font-size: 16px;
+  color: #5eb9ff;
+  letter-spacing: -0.5px;
+}
+
+/* Main App Wrapper (Device Frame container) */
+.device-viewport {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Main Shell */
+.nl-shell {
+  width: 748px;
+  height: 440px;
+  max-width: 96vw;
+  max-height: 94vh;
+  background: var(--shell-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  grid-template-rows: 56px 1fr;
+  grid-template-areas: 
+    "sidebar toolbar"
+    "sidebar content";
+  overflow: hidden;
+  position: relative;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+  transform-origin: center center;
+}
+
+.nl-shell.minimized {
+  transform: scale(0.85);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* SIDEBAR */
+.nl-sidebar {
+  grid-area: sidebar;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 5;
+}
+
+.sidebar-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.onyx-logo-badge {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #10243E, #071220);
+  border: 1px solid rgba(75, 126, 255, 0.35);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(75, 126, 255, 0.2);
+}
+
+.onyx-logo-badge svg {
+  width: 18px;
+  height: 18px;
+  fill: #5eb9ff;
+}
+
+.sidebar-header-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header-titles .title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #FFFFFF, #B9C3D9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.1;
+}
+
+.sidebar-header-titles .subtitle {
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+  text-transform: uppercase;
+}
+
+/* Sidebar Nav (Clean 4 Categories) */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-item {
+  height: 38px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  color: #9AA0B0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+}
+
+.nav-item:hover, .nav-item:active {
+  background: rgba(39, 43, 54, 0.5);
+  color: #E2E4EB;
+}
+
+.nav-item.active {
+  background: #252A38;
+  color: #FFFFFF;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.nav-item.active .nav-icon {
+  color: var(--accent);
+  transform: scale(1.08);
+}
+
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #838896;
+  flex-shrink: 0;
+  transition: transform 0.15s, color 0.15s;
+}
+
+/* Account bar at bottom: by Masuel */
+.sidebar-account {
+  height: 50px;
+  border-top: 1px solid var(--divider);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  position: relative;
+}
+
+.sidebar-account:active, .sidebar-account.active {
+  background: #272B36;
+}
+
+.sidebar-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 15px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(75, 126, 255, 0.4);
+}
+
+.sidebar-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sidebar-account-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar-account-info .name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #E1E3E9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-account-info .badge {
+  font-size: 10px;
+  color: #5EB9FF;
+  font-weight: 500;
+}
+
+.sidebar-account .chevron {
+  color: #B5B9C3;
+  font-size: 11px;
+}
+
+/* TOOLBAR (Clean, without bedrock pvp menu) */
+.nl-toolbar {
+  grid-area: toolbar;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--card-border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  justify-content: space-between;
+  position: relative;
+  z-index: 4;
+}
+
+.toolbar-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8D93A4;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: #2ECC71;
+  box-shadow: 0 0 8px #2ECC71;
+}
+
+.toolbar-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input-wrapper {
+  width: 220px;
+  height: 32px;
+  background: #11131B;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-input-wrapper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.search-input {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #E2E4EB;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.search-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #B4B8C2;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* CONTENT SCROLL AREA */
+.nl-content-scroll {
+  grid-area: content;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  position: relative;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nl-content-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.nl-content-scroll::-webkit-scrollbar-thumb {
+  background: rgba(75, 126, 255, 0.4);
+  border-radius: 3px;
+}
+
+.nl-page {
+  display: none;
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.nl-page.active {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* EXPANDABLE MODULE CARDS (ВЫЕЗДНЫЕ НАСТРОЙКИ ВНИЗ) */
+.module-card {
+  background: var(--module-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.module-card.expanded {
+  border-color: rgba(75, 126, 255, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.module-header {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  background: var(--module-bg);
+}
+
+.module-header:hover, .module-header:active {
+  background: var(--module-hover);
+}
+
+.module-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.module-arrow {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7A8192;
+  font-size: 11px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s;
+}
+
+.module-card.expanded .module-arrow {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.module-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E2E5EE;
+  letter-spacing: -0.2px;
+}
+
+.module-desc {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  margin-left: 6px;
+}
+
+.module-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* SLIDE-DOWN SETTINGS CONTAINER */
+.module-settings {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.32s cubic-bezier(0.16, 1, 0.3, 1), padding 0.25s ease;
+  background: var(--settings-bg);
+  border-top: 1px solid transparent;
+}
+
+.module-card.expanded .module-settings {
+  max-height: 380px;
+  border-top-color: var(--divider);
+  padding: 4px 14px 10px;
+}
+
+.setting-row {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-label {
+  font-size: 12.5px;
+  color: #A4A9B8;
+  font-weight: 500;
+}
+
+/* TOGGLES */
+.nl-toggle {
+  width: 30px;
+  height: 18px;
+  background: var(--toggle-off);
+  border-radius: 9px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+  flex-shrink: 0;
+  padding: 6px;
+  box-sizing: content-box;
+  margin: -6px;
+}
+
+.nl-toggle-track {
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--toggle-off);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.nl-toggle.active .nl-toggle-track {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.nl-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--toggle-thumb-off);
+  transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28), background 0.2s;
+}
+
+.nl-toggle.active .nl-toggle-thumb {
+  transform: translateX(12px);
+  background: #FFFFFF;
+}
+
+/* SLIDERS */
+.nl-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nl-slider-track {
+  width: 86px;
+  height: 3px;
+  background: var(--slider-track);
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
+  padding: 10px 0;
+  background-clip: content-box;
+}
+
+.nl-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.nl-slider-thumb {
+  position: absolute;
+  top: 6.5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.nl-value-pill {
+  width: 46px;
+  height: 22px;
+  background: #181B26;
+  border: 1px solid #232736;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #B5B9C6;
+  font-weight: 500;
+}
+
+/* SELECT BUTTON */
+.nl-select-btn {
+  min-width: 105px;
+  max-width: 130px;
+  height: 24px;
+  background: #181B26;
+  border: 1px solid #242838;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: #B2B6C4;
+  transition: all 0.15s ease;
+}
+
+.nl-select-btn:active {
+  border-color: var(--accent);
+}
+
+/* COLOR CHIP */
+.color-chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: #4B7EFF;
+  border: 1.5px solid rgba(255,255,255,0.3);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transition: transform 0.15s;
+}
+
+.color-chip:active {
+  transform: scale(0.92);
+}
+
+/* RICH COLOR PICKER POPUP (MANY COLORS + NATIVE PICKER) */
+.color-picker-modal {
+  position: fixed;
+  z-index: 2147483001;
+  background: rgba(18, 21, 30, 0.98);
+  border: 1px solid #323749;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.75);
+  padding: 12px;
+  width: 224px;
+  display: none;
+  backdrop-filter: blur(20px);
+  animation: popoverFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.color-picker-modal.open {
+  display: block;
+}
+
+.color-picker-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #CED2DE;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.color-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.palette-swatch {
+  height: 22px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.palette-swatch:active {
+  transform: scale(1.15);
+}
+
+.palette-swatch.active {
+  border-color: #FFFFFF;
+  box-shadow: 0 0 8px rgba(255,255,255,0.4);
+}
+
+.custom-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-color-row input[type="color"] {
+  width: 28px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.custom-color-row input[type="text"] {
+  flex: 1;
+  height: 26px;
+  background: #141722;
+  border: 1px solid #282D3E;
+  border-radius: 5px;
+  color: #FFFFFF;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 0 6px;
+  outline: none;
+}
+
+/* ACCOUNT POPOVER (by Masuel & Language Selector) */
+.account-popover {
+  position: absolute;
+  left: 151px;
+  bottom: 8px;
+  width: 220px;
+  background: rgba(22, 25, 36, 0.98);
+  border: 1px solid #34384B;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.7);
+  padding: 14px;
+  z-index: 99;
+  display: none;
+  animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.account-popover.open {
+  display: block;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.popover-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(75, 126, 255, 0.4);
+}
+
+.popover-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.popover-titles .name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #E5E7ED;
+}
+
+.popover-titles .sub {
+  font-size: 10.5px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.popover-menu {
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popover-row {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #B9BCC6;
+  padding: 0 4px;
+}
+
+.popover-row select {
+  background: #141722;
+  border: 1px solid #282D3E;
+  color: #E2E4EB;
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 11.5px;
+  outline: none;
+  cursor: pointer;
+}
+
+.accent-color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.color-swatch-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.25);
+  transition: transform 0.15s;
+}
+
+.color-swatch-dot:active {
+  transform: scale(1.18);
+}
+
+/* MODAL DROPDOWN (SELECT) */
+.nl-modal-dropdown {
+  position: fixed;
+  z-index: 2147483000;
+  background: rgba(20, 23, 33, 0.98);
+  border: 1px solid #34394D;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+  padding: 5px;
+  display: none;
+  min-width: 125px;
+  animation: popoverFadeIn 0.16s ease;
+}
+
+.nl-modal-dropdown.open {
+  display: block;
+}
+
+.dropdown-option {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #B8BCC8;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.dropdown-option:hover, .dropdown-option:active {
+  background: rgba(75, 126, 255, 0.2);
+  color: #FFFFFF;
+}
+
+.dropdown-option.selected {
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+.dropdown-option .check {
+  width: 14px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('onyx/inter_medium.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 550;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('onyx/inter_semibold.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 551 900;
+  font-display: swap;
+}
+.module-settings {
+  display: none;
+}
+.module-card.expanded .module-settings {
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.shortcut-row .setting-label {
+  color: var(--text-dim);
+}
+.nl-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid #3A4052;
+  background: #181B26;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.nl-checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.nl-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  left: 2px;
+  top: -1px;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+}
+.nl-text-input {
+  width: 132px;
+  height: 24px;
+  background: #181B26;
+  border: 1px solid #242838;
+  border-radius: 5px;
+  color: #B2B6C4;
+  font-family: var(--font-family);
+  font-size: 11.5px;
+  padding: 0 7px;
+  outline: none;
+}
+.nl-text-input:focus {
+  border-color: var(--accent);
+}
+
+.toolbar-close-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #1a1e2a;
+  border: 1px solid #2a3040;
+  color: #AEB4C2;
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 10px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.toolbar-close-btn:active {
+  background: #232838;
+}
+.nl-toolbar {
+  justify-content: flex-start;
+}
+.toolbar-search-box {
+  margin-left: auto;
+}
+html,
+body {
+  background: #0d0f16;
+}
+.device-viewport {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  z-index: 10;
+}
+.nl-shell {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  background: #0d0f16;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: none;
+}
+*,
+*::before,
+*::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+* {
+  animation: none !important;
+}
+.module-settings,
+.nl-toggle-track,
+.nl-toggle-thumb,
+.nl-page,
+.sidebar-nav,
+.search-input-wrapper,
+.nl-select-btn,
+.color-chip {
+  transition: none !important;
+}
+</style>
+</head>
+<body>
+
+
+
+
+
+
+
+<!-- Main Device Viewport Wrapper -->
+<div class="device-viewport">
+  <div class="nl-shell" id="nlShell">
+    
+    <!-- SIDEBAR (COMBAT, MOVEMENT, VISUAL, MISC) -->
+    <div class="nl-sidebar">
+      <div class="sidebar-header">
+        <div class="onyx-logo-badge">
+          <svg viewBox="0 0 24 24"><path d="M12 2L2 9l10 13 10-13-10-7zm0 3.3L18.4 9 12 18.2 5.6 9 12 5.3z"/></svg>
+        </div>
+        <div class="sidebar-header-titles">
+          <span class="title">Onyx Client</span>
+          <span class="subtitle">Bedrock Mobile</span>
+        </div>
+      </div>
+
+      <!-- 4 CLEAN CATEGORIES -->
+      <div class="sidebar-nav">
+        <!-- 1. Combat -->
+        <div class="nav-item active" onclick="switchCategory('combat', this)">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.7 4.3a1 1 0 00-1.4 0L12 10.6 8.4 7a1 1 0 00-1.4 1.4l3.6 3.6L3 19.6a1 1 0 001.4 1.4l7.6-7.6 3.6 3.6a1 1 0 001.4-1.4l-3.6-3.6 6.3-6.3a1 1 0 000-1.4z"/></svg>
+          </div>
+          <span data-i18n="cat_combat">Combat</span>
+        </div>
+
+        <!-- 2. Movement -->
+        <div class="nav-item" onclick="switchCategory('movement', this)">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7z"/></svg>
+          </div>
+          <span data-i18n="cat_movement">Movement</span>
+        </div>
+
+        <!-- 3. Visual -->
+        <div class="nav-item" onclick="switchCategory('visual', this)">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+          </div>
+          <span data-i18n="cat_visual">Visual</span>
+        </div>
+
+        <!-- 4. Misc -->
+        <div class="nav-item" onclick="switchCategory('misc', this)">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65A.488.488 0 0014 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+          </div>
+          <span data-i18n="cat_misc">Misc</span>
+        </div>
+      </div>
+
+      <!-- Account bottom button: by Masuel -->
+      <div class="sidebar-account" onclick="toggleAccountPopover()">
+        <div class="sidebar-avatar">
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' rx='8' fill='%234B7EFF'/%3E%3C/svg%3E" alt="Avatar">
+        </div>
+        <div class="sidebar-account-info">
+          <div class="name">by Masuel</div>
+          <div class="badge">Onyx Client</div>
+        </div>
+        <div class="chevron">❯</div>
+      </div>
+    </div>
+
+    <!-- TOOLBAR (CLEAN, NO BEDROCK PVP DROPDOWN) -->
+    <div class="nl-toolbar">
+      <div class="toolbar-status-badge">
+        <div class="status-dot"></div>
+        <span data-i18n="status_active">Onyx Bedrock • Online</span>
+      </div>
+
+      <!-- Search Box with automatic unmatching module collapse -->
+      <div class="toolbar-search-box">
+        <div class="search-input-wrapper" id="searchInputWrapper">
+          <input type="text" class="search-input" id="nlSearchInput" placeholder="Search modules..." oninput="handleSearch(this.value)">
+        </div>
+      </div>
+      <button class="toolbar-close-btn" style="width:auto;padding:0 10px;font-size:11px" onclick="if(window.OnyxBridge)window.OnyxBridge.exportLogs()" aria-label="Export logs">Logs</button>
+      <button class="toolbar-close-btn" onclick="toggleMenuVisibility()" aria-label="Close">✕</button>
+    </div>
+
+    <!-- CONTENT SCROLL AREA (EXPANDABLE MODULE CARDS) -->
+    <div class="nl-content-scroll" id="contentScroll">
+
+      <!-- ================= 1. COMBAT ================= -->
+      <div class="nl-page active" id="page-combat"></div>
+      <div class="nl-page" id="page-movement"></div>
+      <div class="nl-page" id="page-visual"></div>
+      <div class="nl-page" id="page-misc"></div>
+    </div>
+
+    <!-- MODAL DROPDOWN (SELECT) -->
+    <div class="nl-modal-dropdown" id="modalDropdown"></div>
+
+  </div>
+</div>
+
+<!-- ENRICHED COLOR PICKER POPUP (24 SWATCHES + NATIVE COLOR PICKER) -->
+<div class="color-picker-modal" id="colorPickerModal">
+  <div class="color-picker-title">
+    <span data-i18n="title_color_picker">Select Color</span>
+    <span style="cursor:pointer; color:#7E8496" onclick="closeColorPicker()">✕</span>
+  </div>
+  <div class="color-palette-grid">
+    <!-- Row 1: Blues & Cyans -->
+    <div class="palette-swatch" style="background:#4B7EFF" onclick="applyColor('#4B7EFF')"></div>
+    <div class="palette-swatch" style="background:#5EB9FF" onclick="applyColor('#5EB9FF')"></div>
+    <div class="palette-swatch" style="background:#00D2FF" onclick="applyColor('#00D2FF')"></div>
+    <div class="palette-swatch" style="background:#00F0FF" onclick="applyColor('#00F0FF')"></div>
+    <div class="palette-swatch" style="background:#73D6D2" onclick="applyColor('#73D6D2')"></div>
+    <div class="palette-swatch" style="background:#38EF7D" onclick="applyColor('#38EF7D')"></div>
+    <!-- Row 2: Greens & Emeralds -->
+    <div class="palette-swatch" style="background:#2ECC71" onclick="applyColor('#2ECC71')"></div>
+    <div class="palette-swatch" style="background:#27AE60" onclick="applyColor('#27AE60')"></div>
+    <div class="palette-swatch" style="background:#A8FF78" onclick="applyColor('#A8FF78')"></div>
+    <div class="palette-swatch" style="background:#FDD55A" onclick="applyColor('#FDD55A')"></div>
+    <div class="palette-swatch" style="background:#FFA502" onclick="applyColor('#FFA502')"></div>
+    <div class="palette-swatch" style="background:#FF7675" onclick="applyColor('#FF7675')"></div>
+    <!-- Row 3: Pinks & Reds -->
+    <div class="palette-swatch" style="background:#FF4757" onclick="applyColor('#FF4757')"></div>
+    <div class="palette-swatch" style="background:#EE5253" onclick="applyColor('#EE5253')"></div>
+    <div class="palette-swatch" style="background:#FF2A55" onclick="applyColor('#FF2A55')"></div>
+    <div class="palette-swatch" style="background:#E22BC0" onclick="applyColor('#E22BC0')"></div>
+    <div class="palette-swatch" style="background:#D63031" onclick="applyColor('#D63031')"></div>
+    <div class="palette-swatch" style="background:#AB46FF" onclick="applyColor('#AB46FF')"></div>
+    <!-- Row 4: Purples & Monochrome -->
+    <div class="palette-swatch" style="background:#9D4EDD" onclick="applyColor('#9D4EDD')"></div>
+    <div class="palette-swatch" style="background:#6C5CE7" onclick="applyColor('#6C5CE7')"></div>
+    <div class="palette-swatch" style="background:#3742FA" onclick="applyColor('#3742FA')"></div>
+    <div class="palette-swatch" style="background:#70A1FF" onclick="applyColor('#70A1FF')"></div>
+    <div class="palette-swatch" style="background:#FFFFFF" onclick="applyColor('#FFFFFF')"></div>
+    <div class="palette-swatch" style="background:#2F3542" onclick="applyColor('#2F3542')"></div>
+  </div>
+  <div class="custom-color-row">
+    <input type="color" id="nativeColorPicker" oninput="applyColor(this.value)">
+    <input type="text" id="colorHexInput" placeholder="#4B7EFF" maxlength="7" onchange="applyColor(this.value)">
+    <button style="background:#1c212e; border:1px solid #2d3447; color:#E1E3EB; border-radius:5px; padding:3px 8px; font-size:11px; cursor:pointer;" onclick="applyColor(document.getElementById('colorHexInput').value)">OK</button>
+  </div>
+</div>
+
+<script>
+let isMenuOpen = true;
+let currentTargetChip = null;
+let currentDropdownTarget = null;
+let currentLanguage = 'en';
+
+// TRANSLATION DICTIONARY
+const i18n = {
+  en: {
+    phone_size: "📱 Phone Size:",
+    opt_standard: "Mobile Standard (748x440)",
+    opt_fullscreen: "Fit Fullscreen Phone",
+    btn_toggle: "👁️ Toggle Menu",
+    cat_combat: "Combat",
+    cat_movement: "Movement",
+    cat_visual: "Visual",
+    cat_misc: "Misc",
+    status_active: "Onyx Bedrock • Online",
+    search_placeholder: "Search modules...",
+    lbl_language: "Language",
+    lbl_sounds: "Keybind Sounds",
+    lbl_accent: "Theme Accent:",
+    title_color_picker: "Select Color",
+    // Modules
+    mod_killaura: "Killaura",
+    desc_killaura: "Auto attack nearby entities",
+    set_range: "Attack Range",
+    set_cps: "Clicks Per Second (CPS)",
+    set_priority: "Target Priority",
+    set_wallcheck: "Wallcheck",
+
+    mod_triggerbot: "TriggerBot",
+    desc_triggerbot: "Attack on crosshair target",
+    set_delay: "Attack Delay",
+    set_only_weapons: "Only Weapons",
+
+    mod_aimassist: "AimAssist",
+    desc_aimassist: "Smooth camera magnet",
+    set_smoothness: "Smoothness",
+    set_fov: "Aim Angle (FOV)",
+
+    mod_velocity: "Velocity",
+    desc_velocity: "Reduce received damage push",
+    set_horizontal: "Horizontal %",
+    set_vertical: "Vertical %",
+
+    mod_hitboxes: "Hitboxes",
+    desc_hitboxes: "Expand target collision bounds",
+    set_hitbox_size: "Hitbox Size",
+
+    mod_speed: "Speed",
+    desc_speed: "Custom movement multiplier",
+    set_mode: "Mode",
+    set_speed_val: "Speed Value",
+
+    mod_fly: "Fly",
+    desc_fly: "Fly through the air",
+    set_fly_mode: "Fly Mode",
+    set_vert_speed: "Vertical Speed",
+
+    mod_bhop: "BunnyHop",
+    desc_bhop: "Automatic jump momentum",
+    set_auto_jump: "Auto Jump",
+
+    mod_noslow: "NoSlow",
+    desc_noslow: "No slowdown while eating / bow",
+    set_food_slow: "Food Slowdown",
+    set_bow_slow: "Bow Aim Slowdown",
+
+    mod_jesus: "Jesus",
+    desc_jesus: "Walk directly across water/lava",
+    set_solid_water: "Surface Solid",
+
+    mod_esp: "Player ESP",
+    desc_esp: "Highlight players through walls",
+    set_box_type: "Box Type",
+    set_hp_bar: "Health Bar",
+    set_armor_bar: "Armor Display",
+    set_distance: "Player Distance",
+
+    mod_nametags: "Nametags",
+    desc_nametags: "Clear name, HP and badges",
+    set_tag_scale: "Scale",
+
+    mod_tracers: "Tracers",
+    desc_tracers: "Lines pointing to nearby enemies",
+    set_anchor: "Anchor",
+
+    mod_chestesp: "Chest & Storage ESP",
+    desc_chestesp: "Chests, Shulkers, Barrels",
+    set_ender_chest: "Ender Chests",
+
+    mod_fullbright: "Fullbright",
+    desc_fullbright: "Max vision in dark caves",
+    set_gamma: "Gamma Boost",
+
+    mod_autoarmor: "AutoArmor",
+    desc_autoarmor: "Automatically equip best gear",
+    set_equip_delay: "Equip Delay",
+
+    mod_cheststealer: "ChestStealer",
+    desc_cheststealer: "Loot containers instantly",
+    set_loot_delay: "Loot Delay",
+    set_auto_close: "Auto Close",
+
+    mod_fasteat: "FastEat",
+    desc_fasteat: "Consume food in packets",
+    set_packets: "Packets Count",
+
+    mod_antiafk: "AntiAFK",
+    desc_antiafk: "Prevent server kick",
+    set_action: "Action"
+  },
+  ru: {
+    phone_size: "📱 Размер экрана:",
+    opt_standard: "Стандартный мобильный (748x440)",
+    opt_fullscreen: "Во весь экран телефона",
+    btn_toggle: "👁️ Скрыть/Показать меню",
+    cat_combat: "Бой",
+    cat_movement: "Движение",
+    cat_visual: "Визуалы",
+    cat_misc: "Прочее",
+    status_active: "Onyx Bedrock • В сети",
+    search_placeholder: "Поиск модулей...",
+    lbl_language: "Язык интерфейса",
+    lbl_sounds: "Звуки переключения",
+    lbl_accent: "Акцент темы:",
+    title_color_picker: "Выберите цвет",
+    // Modules
+    mod_killaura: "Киллаура",
+    desc_killaura: "Авто-атака врагов в радиусе",
+    set_range: "Дистанция атаки",
+    set_cps: "Кликов в секунду (CPS)",
+    set_priority: "Приоритет цели",
+    set_wallcheck: "Проверка сквозь стены",
+
+    mod_triggerbot: "ТриггерБот",
+    desc_triggerbot: "Удар при наведении на цель",
+    set_delay: "Задержка удара",
+    set_only_weapons: "Только с оружием",
+
+    mod_aimassist: "АимАссист",
+    desc_aimassist: "Плавная доводка прицела",
+    set_smoothness: "Плавность",
+    set_fov: "Угол захвата (FOV)",
+
+    mod_velocity: "Анти-Отдача",
+    desc_velocity: "Снижение входящего отталкивания",
+    set_horizontal: "По горизонтали %",
+    set_vertical: "По вертикали %",
+
+    mod_hitboxes: "Хитбоксы",
+    desc_hitboxes: "Увеличение области поражения",
+    set_hitbox_size: "Размер хитбокса",
+
+    mod_speed: "Спид",
+    desc_speed: "Множитель скорости бега",
+    set_mode: "Режим",
+    set_speed_val: "Значение скорости",
+
+    mod_fly: "Полёт",
+    desc_fly: "Полёт по воздуху",
+    set_fly_mode: "Режим полёта",
+    set_vert_speed: "Вертикальная скорость",
+
+    mod_bhop: "БанниХоп",
+    desc_bhop: "Авто-прыжки с разгоном",
+    set_auto_jump: "Авто-прыжок",
+
+    mod_noslow: "Без Замедления",
+    desc_noslow: "Бег при еде и стрельбе из лука",
+    set_food_slow: "Замедление при еде",
+    set_bow_slow: "Замедление при натяжке лука",
+
+    mod_jesus: "Иисус (Хождение по воде)",
+    desc_jesus: "Свободный бег по воде и лаве",
+    set_solid_water: "Твёрдая поверхность воды",
+
+    mod_esp: "ЕСП Игроков",
+    desc_esp: "Подсветка игроков сквозь стены",
+    set_box_type: "Тип боксов",
+    set_hp_bar: "Полоса здоровья",
+    set_armor_bar: "Отображение брони",
+    set_distance: "Дистанция до игрока",
+
+    mod_nametags: "Неймтеги",
+    desc_nametags: "Улучшенные ники и значки HP",
+    set_tag_scale: "Масштаб",
+
+    mod_tracers: "Трасера",
+    desc_tracers: "Линии направления к врагам",
+    set_anchor: "Точка привязки",
+
+    mod_chestesp: "ЕСП Сундуков",
+    desc_chestesp: "Сундуки, шалкеры, бочки",
+    set_ender_chest: "Эндер-сундуки",
+
+    mod_fullbright: "Яркость",
+    desc_fullbright: "Максимальное освещение в пещерах",
+    set_gamma: "Усиление гаммы",
+
+    mod_autoarmor: "АвтоБроня",
+    desc_autoarmor: "Автоматическая экипировка лучшей брони",
+    set_equip_delay: "Задержка надевания",
+
+    mod_cheststealer: "АвтоЛут",
+    desc_cheststealer: "Мгновенное лутание сундуков",
+    set_loot_delay: "Задержка забора",
+    set_auto_close: "Авто-закрытие сундука",
+
+    mod_fasteat: "Быстрая Еда",
+    desc_fasteat: "Поедание еды пакетами за доли секунды",
+    set_packets: "Количество пакетов",
+
+    mod_antiafk: "АнтиАФК",
+    desc_antiafk: "Защита от кика за бездействие",
+    set_action: "Действие"
+  }
+};
+
+// APPLY LANGUAGE DYNAMICALLY
+function changeLanguage(lang) {
+  currentLanguage = lang;
+  const dict = i18n[lang] || i18n.en;
+  
+  // Update all [data-i18n] elements
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key]) {
+      el.textContent = dict[key];
+    }
+  });
+
+  // Update input placeholders
+  const searchInp = document.getElementById('nlSearchInput');
+  if (searchInp) {
+    searchInp.placeholder = dict.search_placeholder;
+  }
+}
+
+// Toggle Menu Open / Minimized
+function toggleMenuVisibility() {
+  isMenuOpen = !isMenuOpen;
+  const shell = document.getElementById('nlShell');
+  if (isMenuOpen) {
+    shell.classList.remove('minimized');
+  } else {
+    shell.classList.add('minimized');
+    closeAllPopups();
+  }
+}
+
+// Category Switcher
+function switchCategory(catId, navEl) {
+  document.querySelectorAll('.sidebar-nav .nav-item').forEach(el => el.classList.remove('active'));
+  if (navEl) navEl.classList.add('active');
+
+  document.querySelectorAll('.nl-page').forEach(page => page.classList.remove('active'));
+  const target = document.getElementById('page-' + catId);
+  if (target) {
+    target.classList.add('active');
+  }
+  document.getElementById('contentScroll').scrollTop = 0;
+  closeAllPopups();
+}
+
+// Expand / Collapse Module Settings Downwards
+function toggleModuleExpand(headerEl) {
+  const card = headerEl.closest('.module-card');
+  card.classList.toggle('expanded');
+}
+
+// Toggle Switch Button
+function toggleSelf(toggleEl) {
+  toggleEl.classList.toggle('active');
+}
+
+// SEARCH WITH AUTOMATIC COLLAPSE OF UNMATCHED MODULES
+function handleSearch(query) {
+  const q = query.trim().toLowerCase();
+  const cards = document.querySelectorAll('.module-card');
+  
+  cards.forEach(card => {
+    const nameEl = card.querySelector('.module-name');
+    const descEl = card.querySelector('.module-desc');
+    const txt = (nameEl ? nameEl.textContent : '') + ' ' + (descEl ? descEl.textContent : '');
+    
+    if (!q) {
+      // Reset view
+      card.style.display = 'block';
+      card.style.opacity = '1';
+    } else if (txt.toLowerCase().includes(q)) {
+      // Matched: reveal and keep open for user
+      card.style.display = 'block';
+      card.style.opacity = '1';
+      card.classList.add('expanded');
+    } else {
+      // Unmatched: HIDE AND CLOSE SETTINGS!
+      card.style.display = 'none';
+      card.style.opacity = '0';
+      card.classList.remove('expanded');
+    }
+  });
+}
+
+// Slider Controls
+let activeSlider = null;
+
+function startSliderDrag(e, trackEl) {
+  e.preventDefault();
+  activeSlider = trackEl;
+  updateSliderFromEvent(e);
+
+  window.addEventListener('mousemove', onSliderMove);
+  window.addEventListener('mouseup', onSliderUp);
+  window.addEventListener('touchmove', onSliderMove, {passive: false});
+  window.addEventListener('touchend', onSliderUp);
+}
+
+function onSliderMove(e) {
+  if (!activeSlider) return;
+  updateSliderFromEvent(e);
+}
+
+function onSliderUp() {
+  activeSlider = null;
+  window.removeEventListener('mousemove', onSliderMove);
+  window.removeEventListener('mouseup', onSliderUp);
+  window.removeEventListener('touchmove', onSliderMove);
+  window.removeEventListener('touchend', onSliderUp);
+}
+
+function updateSliderFromEvent(e) {
+  if (!activeSlider) return;
+  const rect = activeSlider.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  let ratio = (clientX - rect.left) / rect.width;
+  ratio = Math.max(0, Math.min(1, ratio));
+
+  const fill = activeSlider.querySelector('.nl-slider-fill');
+  const thumb = activeSlider.querySelector('.nl-slider-thumb');
+  const container = activeSlider.closest('.nl-slider-container');
+  const pill = container.querySelector('.nl-value-pill');
+
+  fill.style.width = (ratio * 100) + '%';
+  thumb.style.left = (ratio * 100) + '%';
+  activeSlider.dataset.val = ratio.toFixed(2);
+
+  const fmt = activeSlider.dataset.format;
+  if (fmt === 'range') {
+    pill.textContent = (3.0 + ratio * 3.0).toFixed(1) + 'm';
+  } else if (fmt === 'cps') {
+    pill.textContent = Math.round(6 + ratio * 16) + ' CPS';
+  } else if (fmt === 'ms') {
+    pill.textContent = Math.round(ratio * 200) + 'ms';
+  } else if (fmt === 'deg') {
+    pill.textContent = (ratio * 180).toFixed(1) + '°';
+  } else if (fmt === 'float') {
+    pill.textContent = (1.0 + ratio * 3.0).toFixed(1) + 'x';
+  } else {
+    pill.textContent = Math.round(ratio * 100) + '%';
+  }
+}
+
+// Select Dropdowns
+function openDropdown(btnEl, options, selectedVal) {
+  closeAllPopups();
+  currentDropdownTarget = btnEl;
+  const dd = document.getElementById('modalDropdown');
+  const rect = btnEl.getBoundingClientRect();
+  const shellRect = document.getElementById('nlShell').getBoundingClientRect();
+
+  let html = '';
+  options.forEach(opt => {
+    const isSel = (opt === selectedVal);
+    html += `<div class="dropdown-option ${isSel ? 'selected' : ''}" onclick="selectDropdownOption('${opt}')">
+      <span class="check">${isSel ? '✓' : ''}</span>
+      <span>${opt}</span>
+    </div>`;
+  });
+
+  dd.innerHTML = html;
+  dd.style.left = Math.min(rect.left - shellRect.left, shellRect.width - 140) + 'px';
+  dd.style.top = (rect.bottom - shellRect.top + 4) + 'px';
+  dd.classList.add('open');
+}
+
+function selectDropdownOption(val) {
+  if (currentDropdownTarget) {
+    const label = currentDropdownTarget.querySelector('.label');
+    if (label) label.textContent = val;
+  }
+  closeAllPopups();
+}
+
+// Account Popover Toggle
+function toggleAccountPopover() {
+  const pop = document.getElementById('accountPopover');
+  if (pop) pop.classList.toggle('open');
+}
+
+// RICH COLOR PICKER LOGIC
+function openColorPopup(chipEl, event) {
+  if (event) event.stopPropagation();
+  closeAllPopups();
+  currentTargetChip = chipEl;
+
+  const modal = document.getElementById('colorPickerModal');
+  const rect = chipEl.getBoundingClientRect();
+
+  let left = rect.left - 200;
+  let top = rect.bottom + 6;
+  const modalW = 224;
+  if (left < 10) left = 10;
+  if (left + modalW > window.innerWidth - 10) {
+    left = Math.max(10, window.innerWidth - modalW - 10);
+  }
+  if (top + 260 > window.innerHeight - 10) top = Math.max(10, rect.top - 260);
+
+  modal.style.left = left + 'px';
+  modal.style.top = top + 'px';
+  modal.classList.add('open');
+
+  const hex = rgbToHex(chipEl.style.backgroundColor) || '#4B7EFF';
+  document.getElementById('colorHexInput').value = hex;
+  document.getElementById('nativeColorPicker').value = hex;
+}
+
+function closeColorPicker() {
+  const modal = document.getElementById('colorPickerModal');
+  if (modal) modal.classList.remove('open');
+}
+
+function applyColor(hex) {
+  if (!hex) return;
+  if (!hex.startsWith('#')) hex = '#' + hex;
+  if (currentTargetChip) {
+    currentTargetChip.style.backgroundColor = hex;
+  }
+  const hexInp = document.getElementById('colorHexInput');
+  const nativePicker = document.getElementById('nativeColorPicker');
+  if (hexInp) hexInp.value = hex;
+  if (nativePicker && hex.length === 7) nativePicker.value = hex;
+}
+
+function rgbToHex(rgb) {
+  if (!rgb) return '#4B7EFF';
+  if (rgb.startsWith('#')) return rgb;
+  const match = rgb.match(/\d+/g);
+  if (!match || match.length < 3) return '#4B7EFF';
+  return '#' + ((1 << 24) + (parseInt(match[0]) << 16) + (parseInt(match[1]) << 8) + parseInt(match[2])).toString(16).slice(1);
+}
+
+function setThemeAccent(hex) {
+  document.documentElement.style.setProperty('--accent', hex);
+  document.documentElement.style.setProperty('--accent-glow', hex + '44');
+  document.querySelectorAll('.mobile-pill-btn').forEach(b => b.style.borderColor = hex);
+}
+
+// Close Popups on Outside Click
+window.addEventListener('click', (e) => {
+  if (!e.target.closest('.account-popover') && !e.target.closest('.sidebar-account')) {
+    const pop = document.getElementById('accountPopover');
+    if (pop) pop.classList.remove('open');
+  }
+  if (!e.target.closest('.nl-modal-dropdown') && !e.target.closest('.nl-select-btn')) {
+    const dd = document.getElementById('modalDropdown');
+    if (dd) dd.classList.remove('open');
+  }
+  if (!e.target.closest('.color-picker-modal') && !e.target.closest('.color-chip')) {
+    closeColorPicker();
+  }
+});
+
+function closeAllPopups() {
+  const pop = document.getElementById('accountPopover');
+  if (pop) pop.classList.remove('open');
+  const dd = document.getElementById('modalDropdown');
+  if (dd) dd.classList.remove('open');
+  closeColorPicker();
+}
+
+// Phone Resolution Switcher
+function changeDeviceMode(mode) {
+  const shell = document.getElementById('nlShell');
+  if (mode === 'fullscreen') {
+    shell.style.width = '100vw';
+    shell.style.height = '100vh';
+    shell.style.maxWidth = '100vw';
+    shell.style.maxHeight = '100vh';
+    shell.style.borderRadius = '0';
+  } else if (mode === 'iphone15') {
+    shell.style.width = '932px';
+    shell.style.height = '430px';
+    shell.style.maxWidth = '96vw';
+    shell.style.maxHeight = '92vh';
+    shell.style.borderRadius = '24px';
+  } else if (mode === 'galaxyS24') {
+    shell.style.width = '912px';
+    shell.style.height = '412px';
+    shell.style.maxWidth = '96vw';
+    shell.style.maxHeight = '92vh';
+    shell.style.borderRadius = '18px';
+  } else {
+    shell.style.width = '748px';
+    shell.style.height = '440px';
+    shell.style.maxWidth = '96vw';
+    shell.style.maxHeight = '94vh';
+    shell.style.borderRadius = '14px';
+  }
+}
+</script>
+<script src="onyx_modules.js"></script>
+</body>
+</html>

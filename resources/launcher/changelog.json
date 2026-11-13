@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "headline": "LeviLauncher v1.6.0",
+  "summary": "Added Minecraft 26.60 support, launcher HUD controls, new world tools, and numerous optimisations.",
+  "sections": [
+    {
+      "title": "New Features",
+      "items": [
+        {
+          "text": "Added support for Minecraft 26.60."
+        },
+        {
+          "text": "Added an option to hide the launcher HUD and overlay buttons."
+        },
+        {
+          "text": "Added a world map and advanced NBT editing."
+        }
+      ]
+    },
+    {
+      "title": "Improvements",
+      "items": [
+        {
+          "text": "Made numerous performance optimisations."
+        }
+      ]
+    },
+    {
+      "title": "Fixes",
+      "items": [
+        {
+          "text": "Fixed the options editor not working."
+        }
+      ]
+    }
+  ]
+}

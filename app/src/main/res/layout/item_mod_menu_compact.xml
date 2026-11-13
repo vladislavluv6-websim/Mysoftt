@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="44dp"
+    android:layout_marginStart="3dp"
+    android:layout_marginTop="2dp"
+    android:layout_marginEnd="3dp"
+    android:layout_marginBottom="2dp"
+    android:defaultFocusHighlightEnabled="false"
+    android:foreground="?attr/selectableItemBackground"
+    app:cardBackgroundColor="#1B1B1B"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="0dp"
+    app:cardPreventCornerOverlap="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="9dp"
+        android:paddingEnd="5dp">
+
+        <View
+            android:id="@+id/mod_card_indicator"
+            android:layout_width="3dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_solstice_indicator"
+            android:visibility="invisible" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/mod_card_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textColor="#D9DBE2"
+                android:textSize="12sp"
+                android:textStyle="bold" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="8sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp" />
+
+            <TextView
+                android:id="@+id/mod_card_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:maxLines="1"
+                android:textColor="#FF4E83FF"
+                android:textSize="9sp"
+                android:visibility="gone" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="8sp" android:autoSizeMaxTextSize="13sp" android:autoSizeStepGranularity="1sp" />
+
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/mod_card_config"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginStart="2dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:defaultFocusHighlightEnabled="false"
+            android:padding="6dp"
+            android:src="@drawable/ic_settings"
+            android:tint="#5E6370" />
+
+        <ImageButton
+            android:id="@+id/mod_card_favorite"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:defaultFocusHighlightEnabled="false"
+            android:padding="6dp"
+            android:src="@drawable/ic_star"
+            android:tint="#5E6370" />
+
+        <Switch
+            android:id="@+id/mod_card_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:defaultFocusHighlightEnabled="false"
+            android:showText="false"
+            android:switchMinWidth="36dp"
+            android:thumbTint="@color/zenix_switch_thumb"
+            android:trackTint="@color/zenix_switch_track"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</androidx.cardview.widget.CardView>

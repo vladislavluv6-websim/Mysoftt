@@ -677,7 +677,28 @@ void applyScaffold(ActorState &s, int tick, bool onGround) {
       }
     }
   }
-  if (candidateCount == 0) return;
+  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
+  static uint32_t s_resolveLog = 0;
+  if (s_resolveLog < 30) {
+    ++s_resolveLog;
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag,
+        "scaffold resolve mode=%d onGround=%d cands=%d c0=%p c1=%p c2=%p "
+        "c3=%p client=%p gm=%p",
+        mode, onGround ? 1 : 0, candidateCount, candidates[0], candidates[1],
+        candidates[2], candidates[3], client, reinterpret_cast<void *>(gmPtr));
+  }
+  if (mode == 0 && onGround) return;  // «под собой» актуально в воздухе
+  static uint32_t s_earlyLog = 0;
+  if (candidateCount == 0) {
+    if (s_earlyLog < 20) {
+      ++s_earlyLog;
+      __android_log_print(ANDROID_LOG_INFO, kTag,
+                          "scaffold: no held item (mode=%d onGround=%d)",
+                          mode, onGround ? 1 : 0);
+    }
+    return;
+  }
 
   // Целевая клетка, куда ставим блок.
   const int feetX = static_cast<int>(std::floor(s.position[0]));
@@ -686,8 +707,6 @@ void applyScaffold(ActorState &s, int tick, bool onGround) {
   int tx = feetX;
   int ty = feetY - 1;   // клетка прямо под ногами — «башня»/ловля падения
   int tz = feetZ;
-  const int mode = g_scaffoldMode.load(std::memory_order_relaxed);
-  if (mode == 0 && onGround) return;  // на земле под собой ставить нечего
   if (mode == 1) {
     ty = feetY - 1;     // мост на уровне пола
     float dx = s.velocity[0];
@@ -826,17 +845,11 @@ void applyMovementPost(void *actor) {
   if (!g_jesusActive.load(std::memory_order_relaxed)) return;
   ActorState state;
   if (!readState(actor, state)) return;
-  if (state.velocity[1] < 0.0f) {
-    state.velocity[1] = 0.0f;
-  }
-  // Водная физика движка за тик сдвигает Y (и вниз, и вверх от буяния).
-  // Пока сдвиг небольшой — возвращаем Y на уровень входа. Так реально стоишь
-  // на поверхности. Большой сдвиг (вход в воду сверху) не трогаем.
+  // Полностью фиксируем вертикаль: и скорость, и позицию по Y. Вода иначе
+  // подбрасывает буянием (vy уходил в +0.34 и выкидывал из воды).
+  state.velocity[1] = 0.0f;
   if (g_jesusPreValid) {
-    const float dy = g_jesusPreY - state.position[1];
-    if (std::fabs(dy) < 0.25f) {
-      state.position[1] = g_jesusPreY;
-    }
+    state.position[1] = g_jesusPreY;
   }
 }
 

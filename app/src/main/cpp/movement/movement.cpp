@@ -481,6 +481,16 @@ void applyAutoJump(ActorState &s, int tick, bool onGround) {
   if (h < 0.2f) h = 0.2f;
   if (h > 20.0f) h = 20.0f;  // до 20 блоков
 
+  static uint32_t s_ajLog = 0;
+  if (s_ajLog < 24) {
+    ++s_ajLog;
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "autojump h=%.2f auto=%d onGround=%d vyBefore=%.3f",
+                        static_cast<double>(h), autoJumpMode ? 1 : 0,
+                        onGround ? 1 : 0,
+                        static_cast<double>(s.velocity[1]));
+  }
+
   const bool autoMode = autoJumpMode && !manualEdge;
   if (autoMode) {
     // Авто-режим: настоящий ввод прыжка (MoveInput), не «прыжок без ввода».
@@ -602,10 +612,12 @@ void applyJesus(ActorState &s, bool onGround) {
     return;  // можно выпрыгнуть
   }
 
-  // Полностью гасим вертикальную скорость (и вниз, и вверх от буяния воды) —
-  // стоим/идём по поверхности как по суше. Прыжок обрабатывается выше.
-  s.velocity[1] = 0.0f;
-  g_cheatingPublished.store(true, std::memory_order_relaxed);
+  // Не трогаем подъём (буяние всплывает к поверхности), лишь запрещаем
+  // погружение. Иначе игрок вместо поверхности «замирает» вглубине.
+  if (vy < 0.0f) {
+    s.velocity[1] = 0.0f;
+    g_cheatingPublished.store(true, std::memory_order_relaxed);
+  }
   g_jesusActive.store(true, std::memory_order_relaxed);
 }
 
@@ -627,6 +639,15 @@ bool usableHeldItem(void *item) {
 void applyScaffold(ActorState &s, int tick, bool onGround) {
   const int step = std::max(1, g_scaffoldInterval.load(std::memory_order_relaxed));
   if (step > 1 && (tick % step) != 0) return;
+
+  static uint32_t s_beginLog = 0;
+  if (s_beginLog < 12) {
+    ++s_beginLog;
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "scaffold begin fn=%p client=%p",
+                        g_useItemOn.load(std::memory_order_relaxed),
+                        g_clientInstance.load(std::memory_order_relaxed));
+  }
 
   UseItemOnFn useItemOn = g_useItemOn.load(std::memory_order_relaxed);
   if (!useItemOn) return;
@@ -789,6 +810,16 @@ void applyFeatures(void *actor) {
   const bool scaffold = g_scaffoldEnabled.load(std::memory_order_relaxed);
   const bool autoJump = g_autoJumpEnabled.load(std::memory_order_relaxed);
 
+  static uint32_t s_featLog = 0;
+  if (s_featLog < 16) {
+    ++s_featLog;
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag,
+        "features fly=%d jesus=%d scaffold=%d autoJump=%d master=%d",
+        fly ? 1 : 0, jesus ? 1 : 0, scaffold ? 1 : 0, autoJump ? 1 : 0,
+        g_enabled.load(std::memory_order_relaxed) ? 1 : 0);
+  }
+
   g_cheatingPublished.store(false, std::memory_order_relaxed);
 
   if (autoJump) applyAutoJump(state, tick, onGround);
@@ -845,23 +876,23 @@ void applyMovementPost(void *actor) {
   if (!g_jesusActive.load(std::memory_order_relaxed)) return;
   ActorState state;
   if (!readState(actor, state)) return;
-  // Полностью фиксируем вертикаль: и скорость, и позицию по Y. Вода иначе
-  // подбрасывает буянием (vy уходил в +0.34 и выкидывал из воды).
-  const float vyBefore = state.velocity[1];
-  const float yAfter = g_jesusPreValid ? g_jesusPreY : state.position[1];
-  state.velocity[1] = 0.0f;
-  if (g_jesusPreValid) {
+  if (state.velocity[1] < 0.0f) {
+    state.velocity[1] = 0.0f;
+  }
+  // Не даём тонуть: если за тик Y ушёл вниз — возвращаем обратно. Подъём по
+  // буянию разрешаем, иначе игрок остался бы нырнуть вглубь.
+  if (g_jesusPreValid && state.position[1] < g_jesusPreY) {
     state.position[1] = g_jesusPreY;
   }
   static uint32_t s_postLog = 0;
-  if (s_postLog < 40) {
+  if (s_postLog < 20) {
     ++s_postLog;
+    const float vyBefore = state.velocity[1];
     __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "jesusPost vy=%.3f->0 yNow=%.2f pinTo=%.2f (was %.3f)",
+                        "jesusPost vy=%.3f->0 yNow=%.2f pinTo=%.2f",
                         static_cast<double>(vyBefore),
                         static_cast<double>(state.position[1]),
-                        static_cast<double>(yAfter),
-                        static_cast<double>(vyBefore));
+                        static_cast<double>(g_jesusPreY));
   }
 }
 

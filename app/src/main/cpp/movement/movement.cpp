@@ -847,9 +847,21 @@ void applyMovementPost(void *actor) {
   if (!readState(actor, state)) return;
   // Полностью фиксируем вертикаль: и скорость, и позицию по Y. Вода иначе
   // подбрасывает буянием (vy уходил в +0.34 и выкидывал из воды).
+  const float vyBefore = state.velocity[1];
+  const float yAfter = g_jesusPreValid ? g_jesusPreY : state.position[1];
   state.velocity[1] = 0.0f;
   if (g_jesusPreValid) {
     state.position[1] = g_jesusPreY;
+  }
+  static uint32_t s_postLog = 0;
+  if (s_postLog < 40) {
+    ++s_postLog;
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "jesusPost vy=%.3f->0 yNow=%.2f pinTo=%.2f (was %.3f)",
+                        static_cast<double>(vyBefore),
+                        static_cast<double>(state.position[1]),
+                        static_cast<double>(yAfter),
+                        static_cast<double>(vyBefore));
   }
 }
 
